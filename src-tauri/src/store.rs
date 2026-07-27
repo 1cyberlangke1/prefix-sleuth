@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 
+#[cfg(feature = "desktop")]
 use tauri::Emitter;
 use tokio::sync::oneshot;
 
@@ -18,6 +19,7 @@ pub struct ProxyState {
     pub proxy_running: Arc<AtomicBool>,
     pub shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     data_dir: Arc<Option<PathBuf>>,
+    #[cfg(feature = "desktop")]
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
@@ -29,6 +31,7 @@ impl ProxyState {
             proxy_running: Arc::new(AtomicBool::new(false)),
             shutdown_tx: Arc::new(Mutex::new(None)),
             data_dir: Arc::new(data_dir),
+            #[cfg(feature = "desktop")]
             app_handle: Arc::new(std::sync::Mutex::new(None)),
         };
         state.load_history();
@@ -115,14 +118,21 @@ impl ProxyState {
     }
 
     /// 设置 Tauri AppHandle，用于向前端推送事件
+    #[cfg(feature = "desktop")]
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
         *self.app_handle.lock().unwrap() = Some(handle);
     }
 
+    #[cfg(feature = "desktop")]
     fn emit(&self, event: &str, payload: impl serde::Serialize + Clone) {
         if let Some(ref handle) = *self.app_handle.lock().unwrap() {
             let _ = handle.emit(event, payload);
         }
+    }
+
+    #[cfg(not(feature = "desktop"))]
+    fn emit(&self, _event: &str, _payload: impl serde::Serialize + Clone) {
+        // noop — Tauri not available
     }
 
     pub fn push_record(&self, record: RequestRecord) {
