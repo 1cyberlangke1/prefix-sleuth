@@ -162,6 +162,26 @@ impl ProxyState {
         }
     }
 
+    pub fn delete_by_label(&self, label: &str) {
+        let mut records = self.records.write().unwrap();
+        let original_len = records.len();
+        records.retain(|r| r.api_key_label != label);
+        
+        if records.len() != original_len {
+            // Rewrite the whole log file
+            if let Some(path) = self.log_path() {
+                if let Ok(mut file) = std::fs::File::create(&path) {
+                    // write backwards since records are stored latest-first in VecDeque, 
+                    // but log is append-only (oldest first)
+                    for r in records.iter().rev() {
+                        let _ = jsonl::write(&mut file, r);
+                    }
+                }
+            }
+            self.emit("config-changed", ()); // notify frontend to refresh
+        }
+    }
+
     pub fn get_summaries(&self) -> Vec<RequestSummary> {
         let records = self.records.read().unwrap();
         records

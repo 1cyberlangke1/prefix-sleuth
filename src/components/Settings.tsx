@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Server, Key, Trash2, Plus, Info, Save } from "lucide-react";
+import { Server, Key, Trash2, Plus, Info, Save, Eraser } from "lucide-react";
 import type { DownstreamKey, ProxyConfig } from "../types";
 
 function Settings() {
@@ -27,12 +27,30 @@ function Settings() {
     });
   };
 
-  const removeDownstream = (i: number) => {
+  const removeDownstream = async (i: number) => {
     if (!config) return;
+    const dk = config.downstream_keys[i];
+    if (dk && dk.label) {
+      try {
+        await invoke("clear_requests_by_key", { label: dk.label });
+      } catch (e) {
+        console.error("Failed to clear records on key delete", e);
+      }
+    }
     setConfig({
       ...config,
       downstream_keys: config.downstream_keys.filter((_, idx) => idx !== i),
     });
+  };
+
+  const clearRecords = async (label: string) => {
+    if (!label) return;
+    try {
+      await invoke("clear_requests_by_key", { label });
+      setMessage(`已清空 ${label} 的所有请求记录`);
+    } catch (e) {
+      setMessage(`清空失败: ${e}`);
+    }
   };
 
   const save = async () => {
@@ -151,13 +169,22 @@ function Settings() {
                   onChange={(e) => updateDownstream(i, "label", e.target.value)}
                   placeholder="标签 (例如: ChatBox)"
                 />
-                <button
-                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
-                  onClick={() => removeDownstream(i)}
-                  title="删除"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-md transition-colors"
+                    onClick={() => clearRecords(dk.label)}
+                    title="清空该客户端的历史记录"
+                  >
+                    <Eraser className="w-4 h-4" />
+                  </button>
+                  <button
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                    onClick={() => removeDownstream(i)}
+                    title="删除"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
             {config.downstream_keys.length === 0 && (

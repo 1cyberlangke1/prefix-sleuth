@@ -35,6 +35,23 @@ fn strip_headers(headers: &hyper::HeaderMap) -> hyper::HeaderMap {
     out
 }
 
+fn inject_stream_options(body: &[u8]) -> Vec<u8> {
+    if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(body) {
+        if let Some(obj) = json.as_object_mut() {
+            if let Some(stream) = obj.get("stream").and_then(|v| v.as_bool()) {
+                if stream {
+                    let stream_options = serde_json::json!({ "include_usage": true });
+                    obj.insert("stream_options".to_string(), stream_options);
+                    if let Ok(new_body) = serde_json::to_vec(&json) {
+                        return new_body;
+                    }
+                }
+            }
+        }
+    }
+    body.to_vec()
+}
+
 fn extract_bearer_token(headers: &hyper::HeaderMap) -> Option<String> {
     headers
         .get("authorization")
@@ -71,11 +88,9 @@ fn resolve_auth(
 
     let label = matched.label.clone();
     let mut new_headers = headers.clone();
-    new_headers.insert(
-        "authorization",
-        hyper::header::HeaderValue::from_str(&format!("Bearer {}", config.upstream_api_key))
-            .unwrap(),
-    );
+    if let Ok(auth_val) = hyper::header::HeaderValue::from_str(&format!("Bearer {}", config.upstream_api_key)) {
+        new_headers.insert("authorization", auth_val);
+    }
 
     Ok((label, new_headers))
 }
@@ -160,7 +175,11 @@ async fn handle_request(
     };
 
     let upstream_url = format!("{}{}", upstream_base.trim_end_matches('/'), path);
-    let body_bytes = collect_body(req.into_body()).await;
+    let mut body_bytes = collect_body(req.into_body()).await;
+
+    if is_chat {
+        body_bytes = inject_stream_options(&body_bytes);
+    }
 
     let record_id = if is_chat {
         let model = extract_model(&String::from_utf8_lossy(&body_bytes));
@@ -262,16 +281,7 @@ async fn handle_request(
     }
 }
 
-pub async fn start_server(state: ProxyState, shutdown_rx: oneshot::Receiver<()>) {
-    let port = {
-        let config = state.config.read().unwrap();
-        config.local_port
-    };
-
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
-        .await
-        .expect("Failed to bind proxy port");
-
+pub async fn start_server(state: ProxyState, listener: tokio::net::TcpListener, shutdown_rx: oneshot::Receiver<()>) {
     tokio::spawn(async move {
         let mut rx = shutdown_rx;
         loop {
