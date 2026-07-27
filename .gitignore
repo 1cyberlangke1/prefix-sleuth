@@ -4,3 +4,4 @@ target/
 .vite/
 *.log
 .DS_Store
+HANDOFF.md
