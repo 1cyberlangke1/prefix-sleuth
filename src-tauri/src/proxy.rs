@@ -211,7 +211,7 @@ async fn handle_request(
         None => {
             if is_stream {
                 let frame_stream = reqwest_resp.bytes_stream()
-                    .map(|r| r.map(|bytes| Frame::data(bytes))
+                    .map(|r| r.map(Frame::data)
                         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>));
                 let body = StreamBody::new(frame_stream).boxed_unsync();
                 build_response(status, resp_headers, body)
