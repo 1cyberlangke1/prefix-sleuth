@@ -214,7 +214,8 @@ async fn handle_request(
                 });
 
                 let frame_stream = tokio_stream::wrappers::ReceiverStream::new(rx)
-                    .map(|bytes| Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Frame::data(bytes)));
+                    .map(Frame::data)
+                    .map(Ok::<_, Box<dyn std::error::Error + Send + Sync>>);
                 let body = StreamBody::new(frame_stream).boxed_unsync();
                 build_response(status, resp_headers, body)
             } else {
