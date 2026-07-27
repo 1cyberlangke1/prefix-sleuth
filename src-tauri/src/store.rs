@@ -249,6 +249,7 @@ mod tests {
             response_status: None,
             duration_ms: 0,
             cache_info: CacheInfo::default(),
+            request_headers: std::collections::HashMap::new(),
         }
     }
 
