@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+/// 下游 Key 配置：客户端用的虚拟 key → 显示标签
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownstreamKey {
+    /// 客户端使用的虚拟 API Key（如 sk-blabla1）
+    pub key: String,
+    /// 显示标签（如 "ChatBox"、"脚本"）
+    pub label: String,
+}
+
 /// 代理配置，用户可在设置页修改
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
@@ -7,8 +16,10 @@ pub struct ProxyConfig {
     pub upstream_base: String,
     /// 本地代理监听端口，默认 9527
     pub local_port: u16,
-    /// 允许的 API Key 白名单，空则全部放行
-    pub allowed_keys: Vec<String>,
+    /// 真正的 DeepSeek API Key，转发时替换到 Authorization header
+    pub upstream_api_key: String,
+    /// 下游虚拟 Key 列表（客户端用这些 key 连代理，区分来源）
+    pub downstream_keys: Vec<DownstreamKey>,
 }
 
 impl Default for ProxyConfig {
@@ -16,7 +27,8 @@ impl Default for ProxyConfig {
         Self {
             upstream_base: "https://api.deepseek.com".into(),
             local_port: 9527,
-            allowed_keys: vec![],
+            upstream_api_key: "".into(),
+            downstream_keys: vec![],
         }
     }
 }
