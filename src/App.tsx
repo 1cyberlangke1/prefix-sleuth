@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { RequestSummary } from "./types";
 import RequestList from "./components/RequestList";
 import RequestDetail from "./components/RequestDetail";
@@ -22,51 +23,74 @@ function App() {
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [apiKeys, setApiKeys] = useState<string[]>([]);
   const [proxyRunning, setProxyRunning] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchRequests = useCallback(async () => {
+  const refreshRequests = async (filter?: string) => {
     try {
-      const filter = apiKeyFilter || undefined;
       const list = await invoke<RequestSummary[]>("get_requests", {
-        apiKeyFilter: filter,
+        apiKeyFilter: filter || undefined,
       });
       setRequests(list);
     } catch (e) {
       console.error("fetch requests failed", e);
     }
-  }, [apiKeyFilter]);
+  };
 
-  const fetchApiKeys = useCallback(async () => {
+  const refreshApiKeys = async () => {
     try {
       const keys = await invoke<string[]>("get_api_keys");
       setApiKeys(keys);
     } catch (e) {
       console.error("fetch keys failed", e);
     }
-  }, []);
+  };
 
-  const fetchStatus = useCallback(async () => {
+  const refreshStatus = async () => {
     try {
       const running = await invoke<boolean>("proxy_status");
       setProxyRunning(running);
     } catch (e) {
       console.error("fetch status failed", e);
     }
-  }, []);
+  };
 
   useEffect(() => {
-    fetchRequests();
-    fetchApiKeys();
-    fetchStatus();
-    intervalRef.current = setInterval(() => {
-      fetchRequests();
-      fetchApiKeys();
-      fetchStatus();
-    }, 1000);
+    refreshRequests(apiKeyFilter);
+    refreshApiKeys();
+    refreshStatus();
+
+    const unlistenPromises: Promise<() => void>[] = [];
+
+    unlistenPromises.push(
+      listen<string>("new-record", () => {
+        refreshRequests(apiKeyFilter);
+        refreshApiKeys();
+      })
+    );
+
+    unlistenPromises.push(
+      listen<string>("record-updated", () => {
+        refreshRequests(apiKeyFilter);
+      })
+    );
+
+    unlistenPromises.push(
+      listen("config-changed", () => {
+        refreshRequests(apiKeyFilter);
+        refreshApiKeys();
+        refreshStatus();
+      })
+    );
+
+    unlistenPromises.push(
+      listen<boolean>("proxy-status-changed", (event) => {
+        setProxyRunning(event.payload);
+      })
+    );
+
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      Promise.all(unlistenPromises).then((fns) => fns.forEach((fn) => fn()));
     };
-  }, [fetchRequests, fetchApiKeys, fetchStatus]);
+  }, [apiKeyFilter]);
 
   const avgRate = useMemo(() => avgCacheRate(requests), [requests]);
 
@@ -77,7 +101,7 @@ function App() {
       } else {
         await invoke("start_proxy");
       }
-      fetchStatus();
+      refreshStatus();
     } catch (e) {
       console.error("toggle proxy failed", e);
     }
