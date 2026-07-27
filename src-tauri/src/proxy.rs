@@ -122,7 +122,14 @@ fn build_response(
 ) -> hyper::Response<DynBody> {
     let mut resp = hyper::Response::new(body);
     *resp.status_mut() = status;
-    resp.headers_mut().extend(headers.iter().map(|(k, v)| (k.clone(), v.clone())));
+    for (k, v) in headers.iter() {
+        if k.as_str().eq_ignore_ascii_case("content-encoding")
+            || k.as_str().eq_ignore_ascii_case("transfer-encoding")
+        {
+            continue;
+        }
+        resp.headers_mut().insert(k.clone(), v.clone());
+    }
     resp
 }
 
