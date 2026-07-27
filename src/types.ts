@@ -1,7 +1,13 @@
+export interface DownstreamKey {
+  key: string;
+  label: string;
+}
+
 export interface ProxyConfig {
   upstream_base: string;
   local_port: number;
-  allowed_keys: string[];
+  upstream_api_key: string;
+  downstream_keys: DownstreamKey[];
 }
 
 export interface CacheInfo {

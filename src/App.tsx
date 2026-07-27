@@ -21,9 +21,8 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [apiKeys, setApiKeys] = useState<string[]>([]);
+  const [proxyRunning, setProxyRunning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const avgRate = useMemo(() => avgCacheRate(requests), [requests]);
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -46,17 +45,43 @@ function App() {
     }
   }, []);
 
+  const fetchStatus = useCallback(async () => {
+    try {
+      const running = await invoke<boolean>("proxy_status");
+      setProxyRunning(running);
+    } catch (e) {
+      console.error("fetch status failed", e);
+    }
+  }, []);
+
   useEffect(() => {
     fetchRequests();
     fetchApiKeys();
+    fetchStatus();
     intervalRef.current = setInterval(() => {
       fetchRequests();
       fetchApiKeys();
+      fetchStatus();
     }, 1000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [fetchRequests, fetchApiKeys]);
+  }, [fetchRequests, fetchApiKeys, fetchStatus]);
+
+  const avgRate = useMemo(() => avgCacheRate(requests), [requests]);
+
+  const toggleProxy = async () => {
+    try {
+      if (proxyRunning) {
+        await invoke("stop_proxy");
+      } else {
+        await invoke("start_proxy");
+      }
+      fetchStatus();
+    } catch (e) {
+      console.error("toggle proxy failed", e);
+    }
+  };
 
   const selected = requests.find((r) => r.id === selectedId) ?? null;
 
@@ -91,15 +116,10 @@ function App() {
           </nav>
         </div>
         <div className="flex items-center gap-3 text-xs text-text-muted">
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-accent-green" />
-            代理运行中
-          </span>
-          <span>{requests.length} 条记录</span>
           {avgRate !== null && (
             <span className="flex items-center gap-1">
               <span className={`w-2 h-2 rounded-full ${avgRate > 0.7 ? "bg-accent-green" : avgRate > 0.3 ? "bg-accent-yellow" : "bg-accent-red"}`} />
-              平均缓存 {(avgRate * 100).toFixed(0)}%
+              缓存 {(avgRate * 100).toFixed(0)}%
             </span>
           )}
           <span className="flex items-center gap-0.5">
@@ -119,6 +139,18 @@ function App() {
               />
             ))}
           </span>
+          <span>{requests.length} 条</span>
+          <button
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+              proxyRunning
+                ? "bg-accent-green/20 text-accent-green hover:bg-accent-green/30"
+                : "bg-accent-red/20 text-accent-red hover:bg-accent-red/30"
+            }`}
+            onClick={toggleProxy}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${proxyRunning ? "bg-accent-green animate-pulse" : "bg-accent-red"}`} />
+            {proxyRunning ? "运行中" : "已停止"}
+          </button>
         </div>
       </header>
 

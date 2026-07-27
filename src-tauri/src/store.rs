@@ -1,5 +1,8 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+
+use tokio::sync::oneshot;
 
 use crate::models::{CacheInfo, ProxyConfig, RequestRecord, RequestSummary};
 
@@ -7,16 +10,22 @@ use crate::models::{CacheInfo, ProxyConfig, RequestRecord, RequestSummary};
 /// 内部用 Arc<RwLock<>> 实现线程安全，Clone 只复制 Arc 指针
 #[derive(Clone)]
 pub struct ProxyState {
-    pub config: Arc<RwLock<ProxyConfig>>,
+    pub config: Arc<std::sync::RwLock<ProxyConfig>>,
     /// 请求记录队列，最新在前，最多保留 1000 条
-    pub records: Arc<RwLock<VecDeque<RequestRecord>>>,
+    pub records: Arc<std::sync::RwLock<VecDeque<RequestRecord>>>,
+    /// 代理服务器是否正在运行
+    pub proxy_running: Arc<AtomicBool>,
+    /// 关闭服务器的信号发送端
+    pub shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl ProxyState {
     pub fn new() -> Self {
         Self {
-            config: Arc::new(RwLock::new(ProxyConfig::default())),
-            records: Arc::new(RwLock::new(VecDeque::with_capacity(1000))),
+            config: Arc::new(std::sync::RwLock::new(ProxyConfig::default())),
+            records: Arc::new(std::sync::RwLock::new(VecDeque::with_capacity(1000))),
+            proxy_running: Arc::new(AtomicBool::new(false)),
+            shutdown_tx: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -30,7 +39,6 @@ impl ProxyState {
     }
 
     /// 流式请求完成后，用重建的完整响应 body 更新已有记录
-    /// 同时解析 usage 中的缓存数据
     pub fn update_response(
         &self,
         id: &str,
@@ -48,17 +56,13 @@ impl ProxyState {
         }
     }
 
-    /// 返回所有记录的摘要列表（不含完整 body，前端列表用）
+    /// 返回所有记录的摘要列表
     pub fn get_summaries(&self) -> Vec<RequestSummary> {
         let records = self.records.read().unwrap();
         records
             .iter()
             .map(|r| {
-                let preview = r
-                    .request_body
-                    .chars()
-                    .take(120)
-                    .collect::<String>();
+                let preview = r.request_body.chars().take(120).collect::<String>();
                 RequestSummary {
                     id: r.id.clone(),
                     timestamp: r.timestamp.clone(),
@@ -74,7 +78,7 @@ impl ProxyState {
             .collect()
     }
 
-    /// 按 ID 查找完整请求记录（前端详情页用）
+    /// 按 ID 查找完整请求记录
     pub fn get_record(&self, id: &str) -> Option<RequestRecord> {
         let records = self.records.read().unwrap();
         records.iter().find(|r| r.id == id).cloned()
@@ -86,11 +90,11 @@ mod tests {
     use super::*;
     use crate::models::CacheInfo;
 
-    fn make_record(id: &str) -> RequestRecord {
+    fn make_record(id: &str, label: &str) -> RequestRecord {
         RequestRecord {
             id: id.into(),
             timestamp: "12:00:00.000".into(),
-            api_key_label: "sk-test****abcd".into(),
+            api_key_label: label.into(),
             method: "POST".into(),
             path: "/v1/chat/completions".into(),
             model: Some("deepseek-chat".into()),
@@ -105,11 +109,10 @@ mod tests {
     #[test]
     fn test_push_and_get_summaries() {
         let state = ProxyState::new();
-        state.push_record(make_record("1"));
-        state.push_record(make_record("2"));
+        state.push_record(make_record("1", "app-a"));
+        state.push_record(make_record("2", "app-b"));
         let summaries = state.get_summaries();
         assert_eq!(summaries.len(), 2);
-        // 最新优先
         assert_eq!(summaries[0].id, "2");
         assert_eq!(summaries[1].id, "1");
     }
@@ -117,7 +120,7 @@ mod tests {
     #[test]
     fn test_update_response() {
         let state = ProxyState::new();
-        state.push_record(make_record("1"));
+        state.push_record(make_record("1", "test"));
 
         let cache_info = CacheInfo {
             prompt_cache_hit_tokens: Some(100),
@@ -136,10 +139,9 @@ mod tests {
     fn test_max_records() {
         let state = ProxyState::new();
         for i in 0..1001 {
-            state.push_record(make_record(&i.to_string()));
+            state.push_record(make_record(&i.to_string(), "x"));
         }
         assert_eq!(state.get_summaries().len(), 1000);
-        // 最旧的（"0"）被淘汰
         assert!(state.get_record("0").is_none());
     }
 

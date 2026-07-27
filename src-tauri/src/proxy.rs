@@ -14,19 +14,13 @@ use tokio::sync::oneshot;
 use crate::models::{extract_cache_info, extract_model, mask_api_key, RequestRecord};
 use crate::store::ProxyState;
 
-/// 统一响应 body 类型：UnsyncBoxBody<Bytes, Box<dyn Error>>
-/// 支持从 Full（静态数据）、StreamBody（流式）等构造
 type DynBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
-/// 转发时需移除的 HTTP hop-by-hop headers
-/// 这些 header 是点对点的，不能透传
 const HOP_BY_HOP: &[&str] = &[
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "transfer-encoding", "upgrade",
 ];
 
-/// 移除 hop-by-hop headers + host + content-length，防止干扰上游
-/// 输入：原始请求 headers → 输出：可转发给上游的 headers
 fn strip_headers(headers: &hyper::HeaderMap) -> hyper::HeaderMap {
     let mut out = hyper::HeaderMap::new();
     for (name, value) in headers.iter() {
@@ -41,37 +35,51 @@ fn strip_headers(headers: &hyper::HeaderMap) -> hyper::HeaderMap {
     out
 }
 
-/// 从 Authorization header 中提取 API Key 并脱敏显示
-/// 如 "Bearer sk-abcdefgh" → "sk-a****bcdefgh"
-fn extract_api_key_label(headers: &hyper::HeaderMap) -> String {
-    if let Some(val) = headers
+fn extract_bearer_token(headers: &hyper::HeaderMap) -> Option<String> {
+    headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-    {
-        if let Some(key) = val.strip_prefix("Bearer ").or(val.strip_prefix("bearer ")) {
-            return mask_api_key(key.trim());
-        }
-        mask_api_key(val)
-    } else {
-        "<no-auth>".into()
+        .and_then(|val| {
+            val.strip_prefix("Bearer ")
+                .or(val.strip_prefix("bearer "))
+                .map(|s| s.trim().to_string())
+        })
+}
+
+/// 验证下游 key 并返回（标签, 替换后的 headers）
+/// 无下游配置时透传原始 key，否则校验并替换为上游 key
+fn resolve_auth(
+    headers: &hyper::HeaderMap,
+    config: &crate::models::ProxyConfig,
+) -> Result<(String, hyper::HeaderMap), hyper::Response<DynBody>> {
+    if config.downstream_keys.is_empty() {
+        let label = extract_bearer_token(headers)
+            .as_deref()
+            .map(mask_api_key)
+            .unwrap_or_else(|| "<no-key>".into());
+        return Ok((label, headers.clone()));
     }
+
+    let token = extract_bearer_token(headers)
+        .ok_or_else(|| err_response(401, "Missing Authorization header".into()))?;
+
+    let matched = config
+        .downstream_keys
+        .iter()
+        .find(|dk| dk.key == token)
+        .ok_or_else(|| err_response(403, "Unknown downstream API key".into()))?;
+
+    let label = matched.label.clone();
+    let mut new_headers = headers.clone();
+    new_headers.insert(
+        "authorization",
+        hyper::header::HeaderValue::from_str(&format!("Bearer {}", config.upstream_api_key))
+            .unwrap(),
+    );
+
+    Ok((label, new_headers))
 }
 
-/// 收集 hyper Incoming body 为 Vec<u8>（输入超时无保护，简单实现）
-async fn collect_body(body: Incoming) -> Vec<u8> {
-    body.collect().await
-        .map(|c| c.to_bytes().to_vec())
-        .unwrap_or_default()
-}
-
-/// 将静态数据装箱为 DynBody，方便统一返回类型
-fn boxed_full(data: impl Into<Bytes>) -> DynBody {
-    Full::new(data.into())
-        .map_err(|e: std::convert::Infallible| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-        .boxed_unsync()
-}
-
-/// 快速构造一个纯文本错误响应（用于 502 等场景）
 fn err_response(status: u16, msg: String) -> hyper::Response<DynBody> {
     hyper::Response::builder()
         .status(status)
@@ -80,15 +88,34 @@ fn err_response(status: u16, msg: String) -> hyper::Response<DynBody> {
         .unwrap()
 }
 
-/// 向上游发送真正的 HTTP 请求，透传 method/headers/body
-/// 输入：上游 URL、原始 method、过滤后的 headers、body、本地端口
-/// 输出：上游 HTTP 响应（状态码 + headers + reqwest Response 流）
-async fn proxy_request(
+fn boxed_full(data: impl Into<Bytes>) -> DynBody {
+    Full::new(data.into())
+        .map_err(|e: std::convert::Infallible| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        .boxed_unsync()
+}
+
+async fn collect_body(body: Incoming) -> Vec<u8> {
+    body.collect().await
+        .map(|c| c.to_bytes().to_vec())
+        .unwrap_or_default()
+}
+
+fn build_response(
+    status: hyper::StatusCode,
+    headers: hyper::HeaderMap,
+    body: DynBody,
+) -> hyper::Response<DynBody> {
+    let mut resp = hyper::Response::new(body);
+    *resp.status_mut() = status;
+    resp.headers_mut().extend(headers.iter().map(|(k, v)| (k.clone(), v.clone())));
+    resp
+}
+
+async fn proxy_to_upstream(
     upstream_url: &str,
     method: hyper::Method,
     headers: hyper::HeaderMap,
     body: Vec<u8>,
-    local_port: u16,
 ) -> Result<(hyper::StatusCode, hyper::HeaderMap, reqwest::Response), reqwest::Error> {
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -101,31 +128,15 @@ async fn proxy_request(
     let resp = client
         .request(upstream_method, upstream_url)
         .headers(forwarded_headers)
-        .header("host", format!("localhost:{}", local_port))
         .body(body)
         .send()
         .await?;
 
     let status = resp.status();
-    let headers = resp.headers().clone();
-    Ok((status, headers, resp))
+    let rsp_headers = resp.headers().clone();
+    Ok((status, rsp_headers, resp))
 }
 
-/// 用状态码 + headers + body 构造标准 hyper Response
-fn build_response(
-    status: hyper::StatusCode,
-    headers: hyper::HeaderMap,
-    body: DynBody,
-) -> hyper::Response<DynBody> {
-    let mut resp = hyper::Response::new(body);
-    *resp.status_mut() = status;
-    resp.headers_mut().extend(headers.iter().map(|(k, v)| (k.clone(), v.clone())));
-    resp
-}
-
-/// 核心请求处理器：记录 → 转发 → 双写流式/非流式 → 返回响应
-/// 输入：共享状态 + 客户端 HTTP 请求
-/// 输出：转发后的 HTTP 响应（所有错误已吞掉作为 502）
 async fn handle_request(
     state: &ProxyState,
     req: hyper::Request<Incoming>,
@@ -135,20 +146,22 @@ async fn handle_request(
         .map(|pq| pq.as_str().to_string())
         .unwrap_or_else(|| req.uri().path().to_string());
     let req_headers = req.headers().clone();
-    let api_key_label = extract_api_key_label(&req_headers);
     let is_chat = path.contains("/chat/completions") && method == hyper::Method::POST;
 
-    let (upstream_url, port) = {
+    // 校验下游 key 并获取标签 + 替换后的 headers
+    // 用块作用域确保 RwLockReadGuard 在 .await 前释放
+    let (api_key_label, final_headers, upstream_base) = {
         let config = state.config.read().unwrap();
-        (
-            format!("{}{}", config.upstream_base.trim_end_matches('/'), path),
-            config.local_port,
-        )
+        let (label, headers) = match resolve_auth(&req_headers, &config) {
+            Ok(v) => v,
+            Err(err_resp) => return err_resp,
+        };
+        (label, headers, config.upstream_base.clone())
     };
 
+    let upstream_url = format!("{}{}", upstream_base.trim_end_matches('/'), path);
     let body_bytes = collect_body(req.into_body()).await;
 
-    // 只有 POST /v1/chat/completions 才记录请求+响应，其他路径透传但不记录
     let record_id = if is_chat {
         let model = extract_model(&String::from_utf8_lossy(&body_bytes));
         let record = RequestRecord {
@@ -171,7 +184,7 @@ async fn handle_request(
         None
     };
 
-    let upstream_resp = match proxy_request(&upstream_url, method, req_headers, body_bytes, port).await {
+    let upstream_resp = match proxy_to_upstream(&upstream_url, method, final_headers, body_bytes).await {
         Ok(r) => r,
         Err(e) => return err_response(502, format!("Upstream error: {}", e)),
     };
@@ -184,14 +197,12 @@ async fn handle_request(
         .map(|ct| ct.contains("text/event-stream") || ct.contains("application/x-ndjson"))
         .unwrap_or(false);
 
-    let resp = match record_id {
-        // 需要记录响应：流式双写 or 非流式直接存
+    match record_id {
         Some(rid) => {
             let recorded_body = Arc::new(std::sync::Mutex::new(Vec::new()));
             let start = std::time::Instant::now();
 
             if is_stream {
-                // 流式双写：mpsc channel 一边推给客户端，一边 append Vec<u8> 重建完整 body
                 let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(128);
                 let recorded = recorded_body.clone();
                 let rid2 = rid.clone();
@@ -221,7 +232,6 @@ async fn handle_request(
                 let body = StreamBody::new(frame_stream).boxed_unsync();
                 build_response(status, resp_headers, body)
             } else {
-                // 非流式：等完整 body 再存
                 let resp_body = match reqwest_resp.bytes().await {
                     Ok(b) => b,
                     Err(_) => Bytes::new(),
@@ -234,7 +244,6 @@ async fn handle_request(
                 build_response(status, resp_headers, boxed_full(resp_body))
             }
         }
-        // 非 chat 路径：透传但不记录
         None => {
             if is_stream {
                 let frame_stream = reqwest_resp.bytes_stream()
@@ -250,15 +259,10 @@ async fn handle_request(
                 build_response(status, resp_headers, boxed_full(resp_body))
             }
         }
-    };
-
-    resp
+    }
 }
 
-/// 启动代理服务器，监听 localhost:port，接受 HTTP 1.1 连接
-/// 输入：共享 ProxyState（内含 config + records）
-/// 输出：oneshot::Sender<()>，调用 send() 即可关闭服务器
-pub async fn start_server(state: ProxyState) -> oneshot::Sender<()> {
+pub async fn start_server(state: ProxyState, shutdown_rx: oneshot::Receiver<()>) {
     let port = {
         let config = state.config.read().unwrap();
         config.local_port
@@ -269,27 +273,28 @@ pub async fn start_server(state: ProxyState) -> oneshot::Sender<()> {
         .expect("Failed to bind proxy port");
 
     tokio::spawn(async move {
+        let mut rx = shutdown_rx;
         loop {
-            if let Ok((stream, _)) = listener.accept().await {
-                let state = state.clone();
-                // 每连接一个独立 task，互不阻塞
-                tokio::spawn(async move {
-                    let io = TokioIo::new(stream);
-                    let svc = service_fn(move |req: hyper::Request<Incoming>| {
+            tokio::select! {
+                _ = &mut rx => break,
+                accept = listener.accept() => {
+                    if let Ok((stream, _)) = accept {
                         let state = state.clone();
-                        async move {
-                            // 使用 Infallible 避免 Box<dyn Error> 生命周期问题
-                            Ok::<_, std::convert::Infallible>(handle_request(&state, req).await)
-                        }
-                    });
-                    let _ = http1::Builder::new()
-                        .serve_connection(io, svc)
-                        .await;
-                });
+                        tokio::spawn(async move {
+                            let io = TokioIo::new(stream);
+                            let svc = service_fn(move |req: hyper::Request<Incoming>| {
+                                let state = state.clone();
+                                async move {
+                                    Ok::<_, std::convert::Infallible>(handle_request(&state, req).await)
+                                }
+                            });
+                            let _ = http1::Builder::new()
+                                .serve_connection(io, svc)
+                                .await;
+                        });
+                    }
+                }
             }
         }
     });
-
-    let (tx, _) = oneshot::channel::<()>();
-    tx
 }
