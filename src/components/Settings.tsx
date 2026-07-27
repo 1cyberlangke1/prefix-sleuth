@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Server, Key, Trash2, Plus, Info, Save } from "lucide-react";
 import type { DownstreamKey, ProxyConfig } from "../types";
 
 function Settings() {
@@ -49,145 +50,158 @@ function Settings() {
 
   if (!config) {
     return (
-      <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
+      <div className="flex-1 flex items-center justify-center text-slate-500 dark:text-slate-400 text-sm">
         加载中...
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6 max-w-3xl">
-      <h2 className="text-base font-bold mb-6 text-accent-blue">代理设置</h2>
+    <div className="flex-1 overflow-auto p-8 max-w-4xl mx-auto w-full">
+      <div className="mb-8">
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+          <Server className="w-6 h-6 text-blue-600 dark:text-blue-500" /> 代理设置
+        </h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+          配置 PrefixSleuth 代理的核心参数和多客户端 Key。
+        </p>
+      </div>
 
-      <div className="space-y-5">
-        <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1.5">
-            DeepSeek API 地址
+      <div className="space-y-6">
+        <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-xl border border-slate-200 dark:border-slate-800">
+          <label className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">
+            上游 API 地址
           </label>
           <input
             type="text"
-            className="w-full bg-surface-1 text-text-primary border border-surface-0/50 rounded px-3 py-2 text-sm outline-none focus:border-accent-blue transition-colors"
+            className="w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-shadow"
             value={config.upstream_base}
             onChange={(e) => setConfig({ ...config, upstream_base: e.target.value })}
             placeholder="https://api.deepseek.com"
           />
-          <p className="text-[11px] text-text-muted mt-1">转发目标的基础 URL</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">转发目标的真实服务器基础 URL。</p>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1.5">
-            本地代理端口
+        <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-xl border border-slate-200 dark:border-slate-800">
+          <label className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">
+            本地监听端口
           </label>
           <input
             type="number"
-            className="w-32 bg-surface-1 text-text-primary border border-surface-0/50 rounded px-3 py-2 text-sm outline-none focus:border-accent-blue transition-colors"
+            className="w-40 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-shadow"
             value={config.local_port}
             onChange={(e) => setConfig({ ...config, local_port: parseInt(e.target.value) || 9527 })}
           />
-          <p className="text-[11px] text-text-muted mt-1">
-            本地监听的端口，客户端连接这个端口
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+            代理运行后，本地应用连接此端口。
           </p>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1.5">
-            上游 API Key（真正的 DeepSeek Key）
+        <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-xl border border-slate-200 dark:border-slate-800">
+          <label className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">
+            上游 API Key (真正的服务商 Key)
           </label>
-          <input
-            type="password"
-            className="w-full bg-surface-1 text-text-primary border border-surface-0/50 rounded px-3 py-2 text-sm outline-none focus:border-accent-blue transition-colors font-mono"
-            value={config.upstream_api_key}
-            onChange={(e) => setConfig({ ...config, upstream_api_key: e.target.value })}
-            placeholder="sk-xxxxxxxxxxxxxxxx"
-          />
-          <p className="text-[11px] text-text-muted mt-1">
-            所有客户端请求都会使用这个 Key 转发给 DeepSeek
+          <div className="relative">
+            <Key className="absolute left-3 top-2.5 w-5 h-5 text-slate-400 dark:text-slate-500" />
+            <input
+              type="password"
+              className="w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg pl-10 pr-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-shadow font-mono"
+              value={config.upstream_api_key}
+              onChange={(e) => setConfig({ ...config, upstream_api_key: e.target.value })}
+              placeholder="sk-xxxxxxxxxxxxxxxx"
+            />
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+            所有从本地转发出去的请求都会自动替换为这个真实的 Key。
           </p>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1.5">
-            下游 Key 列表（客户端连接时使用的虚拟 Key）
-          </label>
-          <p className="text-[11px] text-text-muted mb-2">
-            每个 Key 对应一个客户端，方便区分请求来源。留空则透传原始 Authorization 头。
-          </p>
-
-          {config.downstream_keys.map((dk, i) => (
-            <div key={i} className="flex items-center gap-2 mb-2">
-              <input
-                type="text"
-                className="flex-1 bg-surface-1 text-text-primary border border-surface-0/50 rounded px-2 py-1.5 text-xs outline-none focus:border-accent-blue transition-colors font-mono"
-                value={dk.key}
-                onChange={(e) => updateDownstream(i, "key", e.target.value)}
-                placeholder="sk-xxxxxx（客户端用的 Key）"
-              />
-              <input
-                type="text"
-                className="w-28 bg-surface-1 text-text-primary border border-surface-0/50 rounded px-2 py-1.5 text-xs outline-none focus:border-accent-blue transition-colors"
-                value={dk.label}
-                onChange={(e) => updateDownstream(i, "label", e.target.value)}
-                placeholder="标签"
-              />
-              <button
-                className="px-2 py-1.5 text-xs text-accent-red rounded hover:bg-accent-red/10 transition-colors"
-                onClick={() => removeDownstream(i)}
-              >
-                删除
-              </button>
+        <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-800 dark:text-slate-200">
+                下游虚拟 Key 映射
+              </label>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                分配给不同客户端的假 Key，用于分离追踪它们的缓存记录。
+              </p>
             </div>
-          ))}
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+              onClick={addDownstream}
+            >
+              <Plus className="w-4 h-4" /> 添加
+            </button>
+          </div>
 
-          <button
-            className="mt-1 px-3 py-1 text-xs text-accent-blue bg-accent-blue/10 rounded hover:bg-accent-blue/20 transition-colors"
-            onClick={addDownstream}
-          >
-            + 添加下游 Key
-          </button>
+          <div className="space-y-3">
+            {config.downstream_keys.map((dk, i) => (
+              <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-3 bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+                <input
+                  type="text"
+                  className="flex-1 bg-transparent text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
+                  value={dk.key}
+                  onChange={(e) => updateDownstream(i, "key", e.target.value)}
+                  placeholder="sk-client-key (客户端填的假Key)"
+                />
+                <input
+                  type="text"
+                  className="w-full sm:w-48 bg-transparent text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  value={dk.label}
+                  onChange={(e) => updateDownstream(i, "label", e.target.value)}
+                  placeholder="标签 (例如: ChatBox)"
+                />
+                <button
+                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                  onClick={() => removeDownstream(i)}
+                  title="删除"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            {config.downstream_keys.length === 0 && (
+              <div className="text-center py-4 text-sm text-slate-500 dark:text-slate-400 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg">
+                目前没有映射关系，客户端连接代理时将直接透传 Key。
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex items-center gap-4 pt-4 border-t border-slate-200 dark:border-slate-800">
           <button
-            className="px-4 py-1.5 bg-accent-blue text-surface-2 text-sm font-medium rounded hover:bg-accent-blue/90 transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow-sm transition-colors disabled:opacity-50"
             onClick={save}
             disabled={saving}
           >
-            {saving ? "保存中..." : "保存"}
+            <Save className="w-4 h-4" />
+            {saving ? "保存中..." : "保存设置"}
           </button>
           {message && (
-            <span
-              className={`text-xs ${
-                message.includes("失败") ? "text-accent-red" : "text-accent-green"
-              }`}
-            >
+            <span className={`text-sm font-medium ${message.includes("失败") ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
               {message}
             </span>
           )}
         </div>
 
-        <div className="pt-4 border-t border-surface-0/30">
-          <h3 className="text-xs font-medium text-text-secondary mb-2">用法</h3>
-          <div className="text-xs text-text-muted space-y-1.5 leading-relaxed">
+        <div className="mt-8 bg-blue-50 dark:bg-blue-900/10 p-5 rounded-xl border border-blue-100 dark:border-blue-900/30">
+          <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300 mb-3 flex items-center gap-2">
+            <Info className="w-4 h-4" /> 使用指南
+          </h3>
+          <div className="text-sm text-blue-800 dark:text-blue-400/80 space-y-3">
             <p>
-              将 OpenAI 客户端指向 <code className="text-accent-blue bg-surface-1 px-1 rounded">http://localhost:{config.local_port}</code>
+              1. 启动代理后，将本地应用的请求地址（Base URL）修改为：<code className="font-mono bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800">http://localhost:{config.local_port}</code>
             </p>
-            <p>客户端使用你配置的下游 Key 连接：</p>
-            <pre className="bg-surface-1 p-3 rounded mt-1 text-[11px] leading-relaxed">
-{`# ChatBox
-client = OpenAI(
-    base_url="http://localhost:${config.local_port}",
-    api_key="sk-chatbox-key"  # 你在下游 Key 里配的
-)
+            <p>2. 在应用中，使用你分配好的下游虚拟 Key（如上配置）进行连接：</p>
+            <pre className="bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 p-4 rounded-lg mt-2 text-xs leading-relaxed font-mono overflow-x-auto shadow-sm">
+{`# 示例代码 (Python)
+from openai import OpenAI
 
-# 脚本
 client = OpenAI(
     base_url="http://localhost:${config.local_port}",
-    api_key="sk-script-key"   # 另一个下游 Key
+    api_key="sk-client-key"  # 这里填你在上方添加的下游虚拟 Key
 )`}
             </pre>
-            <p className="text-accent-yellow">
-              请求记录会按下游 Key 的标签分类显示，方便追踪不同客户端的缓存表现。
-            </p>
           </div>
         </div>
       </div>

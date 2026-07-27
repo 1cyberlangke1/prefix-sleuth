@@ -2,32 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
-  font-size: 13px;
-  -webkit-font-smoothing: antialiased;
-}
+@layer base {
+  :root {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #313244 transparent;
-}
+  body {
+    margin: 0;
+    @apply bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100;
+    overflow: hidden;
+    height: 100vh;
+  }
 
-body {
-  margin: 0;
-  background: #1e1e2e;
-  color: #cdd6f4;
-  overflow: hidden;
+  /* Custom minimal scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 dark:bg-slate-700 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400 dark:bg-slate-600;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.5) transparent; /* tailwind slate-400 */
+  }
 }
 
 .diff-add {
-  background-color: rgba(166, 227, 161, 0.15);
-  border-left: 3px solid #a6e3a1;
+  @apply bg-green-100 dark:bg-green-900/30 border-l-[3px] border-green-500;
 }
 
 .diff-remove {
-  background-color: rgba(243, 139, 168, 0.15);
-  border-left: 3px solid #f38ba8;
+  @apply bg-red-100 dark:bg-red-900/30 border-l-[3px] border-red-500;
 }
 
 pre {

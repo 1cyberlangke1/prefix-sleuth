@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Search, Settings as SettingsIcon, Play, Square, Activity, LayoutList, Sun, Moon } from "lucide-react";
 import type { RequestSummary } from "./types";
 import RequestList from "./components/RequestList";
 import RequestDetail from "./components/RequestDetail";
@@ -23,6 +24,26 @@ function App() {
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [apiKeys, setApiKeys] = useState<string[]>([]);
   const [proxyRunning, setProxyRunning] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = (e: MediaQueryListEvent) => {
+      setTheme(e.matches ? "dark" : "light");
+    };
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
+  useEffect(() => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [theme]);
 
   const refreshRequests = async (filter?: string) => {
     try {
@@ -110,81 +131,79 @@ function App() {
   const selected = requests.find((r) => r.id === selectedId) ?? null;
 
   return (
-    <div className="h-screen flex flex-col bg-surface-0 text-text-primary">
-      <header className="h-10 flex items-center justify-between px-4 bg-surface-1 border-b border-surface-0/50 shrink-0">
-        <div className="flex items-center gap-4">
-          <span className="font-bold text-accent-blue text-sm tracking-wide">
-            🔍 PrefixSleuth
+    <div className="h-screen flex flex-col font-sans transition-colors duration-300">
+      <header className="h-14 flex items-center justify-between px-4 sm:px-6 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 z-10">
+        <div className="flex items-center gap-6">
+          <span className="font-bold text-slate-800 dark:text-slate-100 text-base tracking-wide flex items-center gap-2">
+            <Search className="w-5 h-5 text-blue-600 dark:text-blue-400" /> 
+            PrefixSleuth
           </span>
-          <nav className="flex gap-1">
+          <nav className="flex gap-2">
             <button
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 page === "requests"
-                  ? "bg-accent-blue/20 text-accent-blue"
-                  : "text-text-muted hover:text-text-primary hover:bg-surface-0/50"
+                  ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/50"
               }`}
               onClick={() => setPage("requests")}
             >
-              请求
+              <LayoutList className="w-4 h-4" /> 请求
             </button>
             <button
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 page === "settings"
-                  ? "bg-accent-blue/20 text-accent-blue"
-                  : "text-text-muted hover:text-text-primary hover:bg-surface-0/50"
+                  ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/50"
               }`}
               onClick={() => setPage("settings")}
             >
-              设置
+              <SettingsIcon className="w-4 h-4" /> 设置
             </button>
           </nav>
         </div>
-        <div className="flex items-center gap-3 text-xs text-text-muted">
+        
+        <div className="flex items-center gap-5 text-sm text-slate-600 dark:text-slate-400 hidden sm:flex">
           {avgRate !== null && (
-            <span className="flex items-center gap-1">
-              <span className={`w-2 h-2 rounded-full ${avgRate > 0.7 ? "bg-accent-green" : avgRate > 0.3 ? "bg-accent-yellow" : "bg-accent-red"}`} />
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700">
+              <Activity className={`w-3.5 h-3.5 ${avgRate > 0.7 ? "text-green-600 dark:text-green-400" : avgRate > 0.3 ? "text-yellow-600 dark:text-yellow-400" : "text-red-600 dark:text-red-400"}`} />
               缓存 {(avgRate * 100).toFixed(0)}%
             </span>
           )}
-          <span className="flex items-center gap-0.5">
-            {requests.slice(0, 20).reverse().map((r, i) => (
-              <span
-                key={r.id}
-                className={`w-1 h-3 rounded-sm ${
-                  r.cache_hit_rate === null
-                    ? "bg-surface-0/30"
-                    : r.cache_hit_rate > 0.7
-                    ? "bg-accent-green"
-                    : r.cache_hit_rate > 0.3
-                    ? "bg-accent-yellow"
-                    : "bg-accent-red"
-                }`}
-                title={`#${requests.length - i}: ${r.cache_hit_rate !== null ? (r.cache_hit_rate * 100).toFixed(0) + "%" : "—"}`}
-              />
-            ))}
-          </span>
-          <span>{requests.length} 条</span>
+          
+          <span className="font-medium">{requests.length} 条</span>
+          
           <button
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors border ${
               proxyRunning
-                ? "bg-accent-green/20 text-accent-green hover:bg-accent-green/30"
-                : "bg-accent-red/20 text-accent-red hover:bg-accent-red/30"
+                ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/40"
+                : "bg-blue-600 text-white border-blue-600 hover:bg-blue-700 shadow-sm"
             }`}
             onClick={toggleProxy}
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${proxyRunning ? "bg-accent-green animate-pulse" : "bg-accent-red"}`} />
-            {proxyRunning ? "运行中" : "已停止"}
+            {proxyRunning ? (
+              <><Square className="w-4 h-4 fill-current" /> 停止代理</>
+            ) : (
+              <><Play className="w-4 h-4 fill-current" /> 启动代理</>
+            )}
+          </button>
+          
+          <button
+            className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            title="切换深浅色模式"
+          >
+            {theme === "light" ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
           </button>
         </div>
       </header>
 
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex flex-col sm:flex-row overflow-hidden bg-slate-50 dark:bg-slate-950">
         {page === "requests" && (
           <>
-            <aside className="w-72 shrink-0 flex flex-col bg-surface-1 border-r border-surface-0/50">
-              <div className="p-2 border-b border-surface-0/50">
+            <aside className={`w-full sm:w-80 shrink-0 flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 ${selectedId ? 'hidden sm:flex' : 'flex'}`}>
+              <div className="p-3 border-b border-slate-200 dark:border-slate-800">
                 <select
-                  className="w-full bg-surface-0 text-text-primary border border-surface-0/50 rounded px-2 py-1 text-xs outline-none focus:border-accent-blue"
+                  className="w-full bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   value={apiKeyFilter}
                   onChange={(e) => setApiKeyFilter(e.target.value)}
                 >
@@ -202,18 +221,33 @@ function App() {
                 />
               </div>
             </aside>
-            <section className="flex-1 overflow-hidden">
+            <section className={`flex-1 flex-col overflow-hidden bg-white dark:bg-slate-900 ${selectedId ? 'flex' : 'hidden sm:flex'}`}>
               {selected ? (
-                <RequestDetail requestId={selected.id} />
+                <div className="flex flex-col h-full relative">
+                  <div className="sm:hidden px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 flex items-center">
+                    <button
+                      className="text-sm text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline"
+                      onClick={() => setSelectedId(null)}
+                    >
+                      ← 返回列表
+                    </button>
+                  </div>
+                  <RequestDetail requestId={selected.id} />
+                </div>
               ) : (
-                <div className="h-full flex items-center justify-center text-text-muted text-sm">
-                  选择左侧请求查看详情
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
+                  <Search className="w-12 h-12 opacity-20" />
+                  <p>选择左侧请求查看详情</p>
                 </div>
               )}
             </section>
           </>
         )}
-        {page === "settings" && <Settings />}
+        {page === "settings" && (
+          <div className="flex-1 overflow-hidden bg-white dark:bg-slate-900 flex">
+            <Settings />
+          </div>
+        )}
       </main>
     </div>
   );
