@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 
+use tauri::Emitter;
 use tokio::sync::oneshot;
 
 use crate::models::{CacheInfo, ProxyConfig, RequestRecord, RequestSummary};
@@ -17,6 +18,7 @@ pub struct ProxyState {
     pub proxy_running: Arc<AtomicBool>,
     pub shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     data_dir: Arc<Option<PathBuf>>,
+    app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
 impl ProxyState {
@@ -27,6 +29,7 @@ impl ProxyState {
             proxy_running: Arc::new(AtomicBool::new(false)),
             shutdown_tx: Arc::new(Mutex::new(None)),
             data_dir: Arc::new(data_dir),
+            app_handle: Arc::new(std::sync::Mutex::new(None)),
         };
         state.load_history();
         state
@@ -111,13 +114,26 @@ impl ProxyState {
         }
     }
 
+    /// 设置 Tauri AppHandle，用于向前端推送事件
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        *self.app_handle.lock().unwrap() = Some(handle);
+    }
+
+    fn emit(&self, event: &str, payload: impl serde::Serialize + Clone) {
+        if let Some(ref handle) = *self.app_handle.lock().unwrap() {
+            let _ = handle.emit(event, payload);
+        }
+    }
+
     pub fn push_record(&self, record: RequestRecord) {
+        let id = record.id.clone();
         self.append_to_log(&record);
         let mut records = self.records.write().unwrap();
         if records.len() >= MAX_RECORDS {
             records.pop_back();
         }
         records.push_front(record);
+        self.emit("new-record", &id);
     }
 
     pub fn update_response(
@@ -128,14 +144,21 @@ impl ProxyState {
         duration_ms: u64,
         cache_info: CacheInfo,
     ) {
-        let mut records = self.records.write().unwrap();
-        if let Some(record) = records.iter_mut().find(|r| r.id == id) {
-            record.response_status = Some(status);
-            record.response_body = Some(body);
-            record.duration_ms = duration_ms;
-            record.cache_info = cache_info;
-            // 同时追加更新后的记录到日志
-            self.append_to_log(record);
+        let snapshot = {
+            let mut records = self.records.write().unwrap();
+            if let Some(record) = records.iter_mut().find(|r| r.id == id) {
+                record.response_status = Some(status);
+                record.response_body = Some(body);
+                record.duration_ms = duration_ms;
+                record.cache_info = cache_info;
+                Some(record.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.append_to_log(&snapshot);
+            self.emit("record-updated", id);
         }
     }
 

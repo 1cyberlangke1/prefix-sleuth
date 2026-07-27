@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { RequestRecord, DiffResult, Tab } from "../types";
 import DiffView from "./DiffView";
 import JsonViewer from "./JsonViewer";
@@ -21,25 +22,16 @@ function cacheTag(rate: number | null): [string, string] {
   return ["text-accent-red", `${pct}%`];
 }
 
-function fetchRecord(requestId: string): Promise<RequestRecord | null> {
-  return invoke<RequestRecord | null>("get_request_detail", { id: requestId });
-}
-
-function fetchDiff(requestId: string): Promise<DiffResult | null> {
-  return invoke<DiffResult | null>("get_diff", { id: requestId });
-}
-
 function RequestDetail({ requestId }: Props) {
   const [record, setRecord] = useState<RequestRecord | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [tab, setTab] = useState<Tab>("diff");
   const [loading, setLoading] = useState(true);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = () => {
     Promise.all([
-      fetchRecord(requestId),
-      fetchDiff(requestId),
+      invoke<RequestRecord | null>("get_request_detail", { id: requestId }),
+      invoke<DiffResult | null>("get_diff", { id: requestId }),
     ]).then(([rec, diffRes]) => {
       setRecord(rec);
       setDiff(diffRes);
@@ -53,21 +45,15 @@ function RequestDetail({ requestId }: Props) {
     setRecord(null);
     setDiff(null);
     load();
-    // 响应未完成时每秒轮询
-    pollRef.current = setInterval(() => {
-      fetchRecord(requestId).then((rec) => {
-        if (rec) {
-          setRecord(rec);
-          setDiff(null); // 等下次 load
-          fetchDiff(requestId).then(setDiff);
-          if (rec.response_body) {
-            if (pollRef.current) clearInterval(pollRef.current);
-          }
-        }
-      });
-    }, 1000);
+
+    const unlisten = listen<string>("record-updated", (event) => {
+      if (event.payload === requestId) {
+        load();
+      }
+    });
+
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      unlisten.then((fn) => fn());
     };
   }, [requestId]);
 
@@ -175,7 +161,7 @@ function RequestDetail({ requestId }: Props) {
             <JsonViewer json={record.response_body} />
           ) : (
             <div className="h-full flex items-center justify-center text-text-muted text-sm">
-              响应尚未完成或无响应
+              等待响应中...
             </div>
           )
         )}
