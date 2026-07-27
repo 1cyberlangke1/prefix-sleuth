@@ -59,7 +59,7 @@ jobs:
         run: cargo test --no-default-features
 
   build:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'push'
     needs: test
     strategy:
       fail-fast: false
