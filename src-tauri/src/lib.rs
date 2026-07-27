@@ -2,20 +2,23 @@ mod models;
 mod proxy;
 mod store;
 
-use std::sync::atomic::Ordering;
-
-use tauri::{Emitter, Manager};
-use tokio::sync::oneshot;
-
 use models::{DiffResult, ProxyConfig, RequestRecord, RequestSummary};
 use store::ProxyState;
 
-/// 读取当前代理配置
+#[cfg(feature = "desktop")]
+use std::sync::atomic::Ordering;
+#[cfg(feature = "desktop")]
+use tauri::{Emitter, Manager};
+#[cfg(feature = "desktop")]
+use tokio::sync::oneshot;
+
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn get_config(state: tauri::State<'_, ProxyState>) -> ProxyConfig {
     state.config.read().unwrap().clone()
 }
 
+#[cfg(feature = "desktop")]
 async fn do_start_proxy(state: &ProxyState, app_handle: &tauri::AppHandle) -> Result<(), String> {
     if state.proxy_running.load(Ordering::SeqCst) {
         return Err("代理已在运行中".into());
@@ -42,9 +45,10 @@ async fn do_start_proxy(state: &ProxyState, app_handle: &tauri::AppHandle) -> Re
     Ok(())
 }
 
+#[cfg(feature = "desktop")]
 fn do_stop_proxy(state: &ProxyState, app_handle: &tauri::AppHandle) -> Result<(), String> {
     if !state.proxy_running.load(Ordering::SeqCst) {
-        return Ok(()); // 已经是停止状态，无视
+        return Ok(());
     }
 
     let mut shutdown = state.shutdown_tx.lock().map_err(|e| e.to_string())?;
@@ -56,7 +60,7 @@ fn do_stop_proxy(state: &ProxyState, app_handle: &tauri::AppHandle) -> Result<()
     Ok(())
 }
 
-/// 更新代理配置并通知前端，同时持久化
+#[cfg(feature = "desktop")]
 #[tauri::command]
 async fn update_config(
     state: tauri::State<'_, ProxyState>,
@@ -69,7 +73,6 @@ async fn update_config(
     }
     state.save_config();
     
-    // 热重启代理
     let was_running = state.proxy_running.load(Ordering::SeqCst);
     if was_running {
         do_stop_proxy(&state, &app_handle)?;
@@ -80,7 +83,7 @@ async fn update_config(
     Ok(())
 }
 
-/// 启动代理服务器
+#[cfg(feature = "desktop")]
 #[tauri::command]
 async fn start_proxy(
     state: tauri::State<'_, ProxyState>,
@@ -89,7 +92,7 @@ async fn start_proxy(
     do_start_proxy(&state, &app_handle).await
 }
 
-/// 停止代理服务器
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn stop_proxy(
     state: tauri::State<'_, ProxyState>,
@@ -98,13 +101,13 @@ fn stop_proxy(
     do_stop_proxy(&state, &app_handle)
 }
 
-/// 获取代理运行状态
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn proxy_status(state: tauri::State<'_, ProxyState>) -> bool {
     state.proxy_running.load(Ordering::SeqCst)
 }
 
-/// 获取请求列表摘要（按 API Key 可选过滤）
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn get_requests(
     state: tauri::State<'_, ProxyState>,
@@ -119,7 +122,7 @@ fn get_requests(
     summaries
 }
 
-/// 按 ID 获取完整请求记录
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn get_request_detail(
     state: tauri::State<'_, ProxyState>,
@@ -128,7 +131,7 @@ fn get_request_detail(
     state.get_record(&id)
 }
 
-/// 计算相邻两条请求的 prompt diff（按下游 key 隔离）
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn get_diff(
     state: tauri::State<'_, ProxyState>,
@@ -168,7 +171,7 @@ fn diff_text(left: &str, right: &str) -> String {
     result
 }
 
-/// 获取所有已出现的 API Key 标签列表（去重排序）
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn get_api_keys(state: tauri::State<'_, ProxyState>) -> Vec<String> {
     let records = state.records.read().unwrap();
@@ -181,7 +184,7 @@ fn get_api_keys(state: tauri::State<'_, ProxyState>) -> Vec<String> {
     keys
 }
 
-/// 清除特定下游 Key 的所有历史记录
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn clear_requests_by_key(
     state: tauri::State<'_, ProxyState>,
@@ -191,14 +194,14 @@ fn clear_requests_by_key(
     Ok(())
 }
 
-/// 清除所有历史记录
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn clear_all_requests(state: tauri::State<'_, ProxyState>) -> Result<(), String> {
     state.delete_all();
     Ok(())
 }
 
-/// Tauri 应用入口点
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
