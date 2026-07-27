@@ -168,6 +168,7 @@ pub fn run() {
             }
             let proxy_state = ProxyState::new(data_dir);
             proxy_state.load_config();
+            proxy_state.set_app_handle(app.handle().clone());
             app.manage(proxy_state);
             Ok(())
         })
