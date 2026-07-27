@@ -4,8 +4,7 @@ mod store;
 
 use std::sync::atomic::Ordering;
 
-use tauri::Emitter;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::oneshot;
 
 use models::{DiffResult, ProxyConfig, RequestRecord, RequestSummary};
@@ -159,7 +158,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir().ok();
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let data_dir = Some(exe_dir.join("data"));
             if let Some(ref dir) = data_dir {
                 let _ = std::fs::create_dir_all(dir);
             }
