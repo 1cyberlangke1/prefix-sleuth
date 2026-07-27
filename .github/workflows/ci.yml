@@ -67,7 +67,7 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            bundle: deb,appimage
+            bundle: deb
           - os: macos-latest
             target: x86_64-apple-darwin
             bundle: dmg
@@ -76,6 +76,8 @@ jobs:
             bundle: msi
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v5
