@@ -51,7 +51,7 @@ fn extract_bearer_token(headers: &hyper::HeaderMap) -> Option<String> {
 fn resolve_auth(
     headers: &hyper::HeaderMap,
     config: &crate::models::ProxyConfig,
-) -> Result<(String, hyper::HeaderMap), hyper::Response<DynBody>> {
+) -> Result<(String, hyper::HeaderMap), Box<hyper::Response<DynBody>>> {
     if config.downstream_keys.is_empty() {
         let label = extract_bearer_token(headers)
             .as_deref()
@@ -61,13 +61,13 @@ fn resolve_auth(
     }
 
     let token = extract_bearer_token(headers)
-        .ok_or_else(|| err_response(401, "Missing Authorization header".into()))?;
+        .ok_or_else(|| Box::new(err_response(401, "Missing Authorization header".into())))?;
 
     let matched = config
         .downstream_keys
         .iter()
         .find(|dk| dk.key == token)
-        .ok_or_else(|| err_response(403, "Unknown downstream API key".into()))?;
+        .ok_or_else(|| Box::new(err_response(403, "Unknown downstream API key".into())))?;
 
     let label = matched.label.clone();
     let mut new_headers = headers.clone();
@@ -154,7 +154,7 @@ async fn handle_request(
         let config = state.config.read().unwrap();
         let (label, headers) = match resolve_auth(&req_headers, &config) {
             Ok(v) => v,
-            Err(err_resp) => return err_resp,
+            Err(err_resp) => return *err_resp,
         };
         (label, headers, config.upstream_base.clone())
     };
