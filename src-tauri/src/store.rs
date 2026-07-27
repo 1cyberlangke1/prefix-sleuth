@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
-use crate::models::{ProxyConfig, RequestRecord, RequestSummary};
+use crate::models::{CacheInfo, ProxyConfig, RequestRecord, RequestSummary};
 
 /// 应用全局状态，同时被 Tauri 命令和代理服务器持有
 /// 内部用 Arc<RwLock<>> 实现线程安全，Clone 只复制 Arc 指针
@@ -30,19 +30,21 @@ impl ProxyState {
     }
 
     /// 流式请求完成后，用重建的完整响应 body 更新已有记录
-    /// 输入 record.id、状态码、完整 body、耗时
+    /// 同时解析 usage 中的缓存数据
     pub fn update_response(
         &self,
         id: &str,
         status: u16,
         body: String,
         duration_ms: u64,
+        cache_info: CacheInfo,
     ) {
         let mut records = self.records.write().unwrap();
         if let Some(record) = records.iter_mut().find(|r| r.id == id) {
             record.response_status = Some(status);
             record.response_body = Some(body);
             record.duration_ms = duration_ms;
+            record.cache_info = cache_info;
         }
     }
 
@@ -66,6 +68,7 @@ impl ProxyState {
                     model: r.model.clone(),
                     response_status: r.response_status,
                     request_preview: preview,
+                    cache_hit_rate: r.cache_info.cache_hit_rate,
                 }
             })
             .collect()
@@ -75,5 +78,75 @@ impl ProxyState {
     pub fn get_record(&self, id: &str) -> Option<RequestRecord> {
         let records = self.records.read().unwrap();
         records.iter().find(|r| r.id == id).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::CacheInfo;
+
+    fn make_record(id: &str) -> RequestRecord {
+        RequestRecord {
+            id: id.into(),
+            timestamp: "12:00:00.000".into(),
+            api_key_label: "sk-test****abcd".into(),
+            method: "POST".into(),
+            path: "/v1/chat/completions".into(),
+            model: Some("deepseek-chat".into()),
+            request_body: r#"{"messages":[{"role":"user","content":"hi"}]}"#.into(),
+            response_body: None,
+            response_status: None,
+            duration_ms: 0,
+            cache_info: CacheInfo::default(),
+        }
+    }
+
+    #[test]
+    fn test_push_and_get_summaries() {
+        let state = ProxyState::new();
+        state.push_record(make_record("1"));
+        state.push_record(make_record("2"));
+        let summaries = state.get_summaries();
+        assert_eq!(summaries.len(), 2);
+        // 最新优先
+        assert_eq!(summaries[0].id, "2");
+        assert_eq!(summaries[1].id, "1");
+    }
+
+    #[test]
+    fn test_update_response() {
+        let state = ProxyState::new();
+        state.push_record(make_record("1"));
+
+        let cache_info = CacheInfo {
+            prompt_cache_hit_tokens: Some(100),
+            prompt_cache_miss_tokens: Some(50),
+            cache_hit_rate: Some(2.0 / 3.0),
+        };
+        state.update_response("1", 200, r#"{"usage":{}}"#.into(), 123, cache_info.clone());
+
+        let record = state.get_record("1").unwrap();
+        assert_eq!(record.response_status, Some(200));
+        assert_eq!(record.duration_ms, 123);
+        assert_eq!(record.cache_info.prompt_cache_hit_tokens, Some(100));
+    }
+
+    #[test]
+    fn test_max_records() {
+        let state = ProxyState::new();
+        for i in 0..1001 {
+            state.push_record(make_record(&i.to_string()));
+        }
+        assert_eq!(state.get_summaries().len(), 1000);
+        // 最旧的（"0"）被淘汰
+        assert!(state.get_record("0").is_none());
+    }
+
+    #[test]
+    fn test_empty_state() {
+        let state = ProxyState::new();
+        assert!(state.get_summaries().is_empty());
+        assert!(state.get_record("nonexistent").is_none());
     }
 }

@@ -4,6 +4,12 @@ export interface ProxyConfig {
   allowed_keys: string[];
 }
 
+export interface CacheInfo {
+  prompt_cache_hit_tokens: number | null;
+  prompt_cache_miss_tokens: number | null;
+  cache_hit_rate: number | null;
+}
+
 export interface RequestRecord {
   id: string;
   timestamp: string;
@@ -15,6 +21,7 @@ export interface RequestRecord {
   response_body: string | null;
   response_status: number | null;
   duration_ms: number;
+  cache_info: CacheInfo;
 }
 
 export interface RequestSummary {
@@ -26,6 +33,7 @@ export interface RequestSummary {
   model: string | null;
   response_status: number | null;
   request_preview: string;
+  cache_hit_rate: number | null;
 }
 
 export interface DiffResult {
