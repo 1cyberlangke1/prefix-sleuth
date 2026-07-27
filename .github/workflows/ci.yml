@@ -125,3 +125,5 @@ jobs:
         with:
           files: |
             src-tauri/target/release/bundle/**/*
+            src-tauri/target/release/prefix-sleuth
+            src-tauri/target/release/prefix-sleuth.exe
