@@ -254,7 +254,7 @@ async fn handle_request(
                     while let Some(bytes) = record_rx.recv().await {
                         recorded.extend_from_slice(&bytes);
                         chunk_count += 1;
-                        if chunk_count % 5 == 0 {
+                        if chunk_count.is_multiple_of(5) {
                             let partial = String::from_utf8_lossy(&recorded).to_string();
                             let elapsed = start.elapsed().as_millis() as u64;
                             let cache_info = extract_cache_info(&partial);
