@@ -16,18 +16,66 @@ fn get_config(state: tauri::State<'_, ProxyState>) -> ProxyConfig {
     state.config.read().unwrap().clone()
 }
 
+async fn do_start_proxy(state: &ProxyState, app_handle: &tauri::AppHandle) -> Result<(), String> {
+    if state.proxy_running.load(Ordering::SeqCst) {
+        return Err("代理已在运行中".into());
+    }
+
+    let port = state.config.read().map_err(|e| e.to_string())?.local_port;
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
+        .await
+        .map_err(|e| format!("绑定端口 {} 失败: {}", port, e))?;
+
+    let (tx, rx) = oneshot::channel::<()>();
+    {
+        let mut shutdown = state.shutdown_tx.lock().map_err(|e| e.to_string())?;
+        *shutdown = Some(tx);
+    }
+    state.proxy_running.store(true, Ordering::SeqCst);
+    let _ = app_handle.emit("proxy-status-changed", true);
+
+    let state_clone = state.clone();
+    tauri::async_runtime::spawn(async move {
+        proxy::start_server(state_clone, listener, rx).await;
+    });
+
+    Ok(())
+}
+
+fn do_stop_proxy(state: &ProxyState, app_handle: &tauri::AppHandle) -> Result<(), String> {
+    if !state.proxy_running.load(Ordering::SeqCst) {
+        return Ok(()); // 已经是停止状态，无视
+    }
+
+    let mut shutdown = state.shutdown_tx.lock().map_err(|e| e.to_string())?;
+    if let Some(tx) = shutdown.take() {
+        let _ = tx.send(());
+    }
+    state.proxy_running.store(false, Ordering::SeqCst);
+    let _ = app_handle.emit("proxy-status-changed", false);
+    Ok(())
+}
+
 /// 更新代理配置并通知前端，同时持久化
 #[tauri::command]
-fn update_config(
+async fn update_config(
     state: tauri::State<'_, ProxyState>,
     app_handle: tauri::AppHandle,
     config: ProxyConfig,
 ) -> Result<(), String> {
     {
-        let mut cfg = state.config.write().unwrap();
+        let mut cfg = state.config.write().map_err(|e| e.to_string())?;
         *cfg = config;
     }
     state.save_config();
+    
+    // 热重启代理
+    let was_running = state.proxy_running.load(Ordering::SeqCst);
+    if was_running {
+        do_stop_proxy(&state, &app_handle)?;
+        do_start_proxy(&state, &app_handle).await?;
+    }
+
     app_handle.emit("config-changed", ()).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -38,25 +86,7 @@ async fn start_proxy(
     state: tauri::State<'_, ProxyState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    if state.proxy_running.load(Ordering::SeqCst) {
-        return Err("代理已在运行中".into());
-    }
-
-    let (tx, rx) = oneshot::channel::<()>();
-    {
-        let mut shutdown = state.shutdown_tx.lock().unwrap();
-        *shutdown = Some(tx);
-    }
-    state.proxy_running.store(true, Ordering::SeqCst);
-    let _ = app_handle.emit("proxy-status-changed", true);
-
-    let state_clone = state.inner().clone();
-    tauri::async_runtime::spawn(async move {
-        proxy::start_server(state_clone, rx).await;
-        // 服务器退出后更新状态
-    });
-
-    Ok(())
+    do_start_proxy(&state, &app_handle).await
 }
 
 /// 停止代理服务器
@@ -65,17 +95,7 @@ fn stop_proxy(
     state: tauri::State<'_, ProxyState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    if !state.proxy_running.load(Ordering::SeqCst) {
-        return Err("代理未在运行".into());
-    }
-
-    let mut shutdown = state.shutdown_tx.lock().unwrap();
-    if let Some(tx) = shutdown.take() {
-        let _ = tx.send(());
-    }
-    state.proxy_running.store(false, Ordering::SeqCst);
-    let _ = app_handle.emit("proxy-status-changed", false);
-    Ok(())
+    do_stop_proxy(&state, &app_handle)
 }
 
 /// 获取代理运行状态
@@ -161,6 +181,16 @@ fn get_api_keys(state: tauri::State<'_, ProxyState>) -> Vec<String> {
     keys
 }
 
+/// 清除特定下游 Key 的所有历史记录
+#[tauri::command]
+fn clear_requests_by_key(
+    state: tauri::State<'_, ProxyState>,
+    label: String,
+) -> Result<(), String> {
+    state.delete_by_label(&label);
+    Ok(())
+}
+
 /// Tauri 应用入口点
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -191,6 +221,7 @@ pub fn run() {
             get_request_detail,
             get_diff,
             get_api_keys,
+            clear_requests_by_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
