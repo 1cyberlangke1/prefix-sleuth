@@ -34,7 +34,10 @@ fn update_config(
 
 /// 启动代理服务器
 #[tauri::command]
-async fn start_proxy(state: tauri::State<'_, ProxyState>) -> Result<(), String> {
+async fn start_proxy(
+    state: tauri::State<'_, ProxyState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     if state.proxy_running.load(Ordering::SeqCst) {
         return Err("代理已在运行中".into());
     }
@@ -45,10 +48,12 @@ async fn start_proxy(state: tauri::State<'_, ProxyState>) -> Result<(), String> 
         *shutdown = Some(tx);
     }
     state.proxy_running.store(true, Ordering::SeqCst);
+    let _ = app_handle.emit("proxy-status-changed", true);
 
     let state_clone = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         proxy::start_server(state_clone, rx).await;
+        // 服务器退出后更新状态
     });
 
     Ok(())
@@ -56,7 +61,10 @@ async fn start_proxy(state: tauri::State<'_, ProxyState>) -> Result<(), String> 
 
 /// 停止代理服务器
 #[tauri::command]
-fn stop_proxy(state: tauri::State<'_, ProxyState>) -> Result<(), String> {
+fn stop_proxy(
+    state: tauri::State<'_, ProxyState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     if !state.proxy_running.load(Ordering::SeqCst) {
         return Err("代理未在运行".into());
     }
@@ -66,6 +74,7 @@ fn stop_proxy(state: tauri::State<'_, ProxyState>) -> Result<(), String> {
         let _ = tx.send(());
     }
     state.proxy_running.store(false, Ordering::SeqCst);
+    let _ = app_handle.emit("proxy-status-changed", false);
     Ok(())
 }
 
