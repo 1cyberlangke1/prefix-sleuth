@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// 下游 Key 配置：客户端用的虚拟 key → 显示标签
@@ -59,6 +61,9 @@ pub struct RequestRecord {
     pub model: Option<String>,
     /// 原始请求体 JSON
     pub request_body: String,
+    /// 关键请求头（用于诊断乱码原因）
+    #[serde(default)]
+    pub request_headers: HashMap<String, String>,
     /// 原始响应体 JSON（流式完成后重建）
     pub response_body: Option<String>,
     /// HTTP 响应状态码
