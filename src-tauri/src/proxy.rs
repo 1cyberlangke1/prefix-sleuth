@@ -1,9 +1,5 @@
-use std::io::Read;
-use std::sync::Arc;
-
 use bytes::Bytes;
 use chrono::Utc;
-use flate2::read::GzDecoder;
 use futures::StreamExt;
 use http_body::Frame;
 use http_body_util::{BodyExt, Full, StreamBody};
@@ -117,27 +113,6 @@ async fn collect_body(body: Incoming) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-fn is_gzipped(headers: &hyper::HeaderMap) -> bool {
-    headers
-        .get("content-encoding")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.contains("gzip"))
-        .unwrap_or(false)
-}
-
-/// 解压 gzip 数据。如果没压缩或解压失败，返回原数据
-fn decompress_body(bytes: &[u8], headers: &hyper::HeaderMap) -> Vec<u8> {
-    if !is_gzipped(headers) {
-        return bytes.to_vec();
-    }
-    let mut decoder = GzDecoder::new(bytes);
-    let mut out = Vec::new();
-    if decoder.read_to_end(&mut out).is_err() {
-        return bytes.to_vec();
-    }
-    out
-}
-
 fn build_response(
     status: hyper::StatusCode,
     headers: hyper::HeaderMap,
@@ -214,6 +189,15 @@ async fn handle_request(
             path: path.clone(),
             model,
             request_body: String::from_utf8_lossy(&body_bytes).to_string(),
+            request_headers: {
+                let mut h = std::collections::HashMap::new();
+                for (name, value) in req_headers.iter() {
+                    if let Ok(v) = value.to_str() {
+                        h.insert(name.as_str().to_string(), v.to_string());
+                    }
+                }
+                h
+            },
             response_body: None,
             response_status: None,
             duration_ms: 0,
@@ -241,39 +225,44 @@ async fn handle_request(
 
     match record_id {
         Some(rid) => {
-            let recorded_body = Arc::new(std::sync::Mutex::new(Vec::new()));
             let start = std::time::Instant::now();
 
             if is_stream {
                 let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(128);
-                let recorded = recorded_body.clone();
+                let (record_tx, mut record_rx) = tokio::sync::mpsc::channel::<Bytes>(256);
                 let rid2 = rid.clone();
                 let state2 = state.clone();
-                let resp_headers2 = resp_headers.clone();
 
+                // 转发任务：纯透传，零阻塞
                 tokio::spawn(async move {
                     let mut stream = reqwest_resp.bytes_stream();
-                    let mut chunk_count = 0u64;
                     while let Some(chunk) = stream.next().await {
                         match chunk {
                             Ok(bytes) => {
-                                recorded.lock().unwrap().extend_from_slice(&bytes);
+                                let _ = record_tx.try_send(bytes.clone());
                                 if tx.send(bytes).await.is_err() { break; }
-                                chunk_count += 1;
-                                if chunk_count % 5 == 0 {
-                                    let partial_raw = recorded.lock().unwrap().clone();
-                                    let partial = String::from_utf8_lossy(&decompress_body(&partial_raw, &resp_headers2)).to_string();
-                                    let elapsed = start.elapsed().as_millis() as u64;
-                                    let cache_info = extract_cache_info(&partial);
-                                    state2.update_response(&rid2, status.as_u16(), partial, elapsed, cache_info);
-                                }
                             }
                             Err(_) => break,
                         }
                     }
-                    drop(tx);
+                });
+
+                // 记录任务：异步积累，不影响转发
+                tokio::spawn(async move {
+                    let mut recorded = Vec::new();
+                    let mut chunk_count = 0u64;
+                    while let Some(bytes) = record_rx.recv().await {
+                        recorded.extend_from_slice(&bytes);
+                        chunk_count += 1;
+                        if chunk_count % 5 == 0 {
+                            let partial = String::from_utf8_lossy(&recorded).to_string();
+                            let elapsed = start.elapsed().as_millis() as u64;
+                            let cache_info = extract_cache_info(&partial);
+                            state2.update_response(&rid2, status.as_u16(), partial, elapsed, cache_info);
+                        }
+                    }
                     let elapsed = start.elapsed().as_millis() as u64;
-                    let full = String::from_utf8_lossy(&decompress_body(&recorded.lock().unwrap(), &resp_headers2)).to_string();
+                    let full = String::from_utf8_lossy(&recorded).to_string();
                     let cache_info = extract_cache_info(&full);
                     state2.update_response(&rid2, status.as_u16(), full, elapsed, cache_info);
                 });
@@ -289,7 +278,7 @@ async fn handle_request(
                     Err(_) => Bytes::new(),
                 };
                 let elapsed = start.elapsed().as_millis() as u64;
-                let body_str = String::from_utf8_lossy(&decompress_body(&resp_body, &resp_headers)).to_string();
+                let body_str = String::from_utf8_lossy(&resp_body).to_string();
                 let cache_info = extract_cache_info(&body_str);
                 state.update_response(&rid, status.as_u16(), body_str, elapsed, cache_info);
 

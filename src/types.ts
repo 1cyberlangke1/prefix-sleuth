@@ -24,6 +24,7 @@ export interface RequestRecord {
   path: string;
   model: string | null;
   request_body: string;
+  request_headers: Record<string, string>;
   response_body: string | null;
   response_status: number | null;
   duration_ms: number;
@@ -51,4 +52,4 @@ export interface DiffResult {
   diff_text: string;
 }
 
-export type Tab = "diff" | "request" | "response";
+export type Tab = "diff" | "headers" | "request" | "response";

@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Server, Key, Trash2, Plus, Info, Save, Eraser } from "lucide-react";
+import { Server, Key, Trash2, Plus, Info, Save, Eraser, Eye, EyeOff } from "lucide-react";
 import type { DownstreamKey, ProxyConfig } from "../types";
 
 function Settings() {
   const [config, setConfig] = useState<ProxyConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [showUpstreamKey, setShowUpstreamKey] = useState(false);
+  const [showDownstreamKeys, setShowDownstreamKeys] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     invoke<ProxyConfig>("get_config").then(setConfig);
@@ -122,12 +124,19 @@ function Settings() {
           <div className="relative">
             <Key className="absolute left-3 top-2.5 w-5 h-5 text-slate-400 dark:text-slate-500" />
             <input
-              type="password"
-              className="w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg pl-10 pr-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-shadow font-mono"
+              type={showUpstreamKey ? "text" : "password"}
+              className="w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg pl-10 pr-10 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-shadow font-mono"
               value={config.upstream_api_key}
               onChange={(e) => setConfig({ ...config, upstream_api_key: e.target.value })}
               placeholder="sk-xxxxxxxxxxxxxxxx"
             />
+            <button
+              className="absolute right-2 top-2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              onClick={() => setShowUpstreamKey(!showUpstreamKey)}
+              tabIndex={-1}
+            >
+              {showUpstreamKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
             所有从本地转发出去的请求都会自动替换为这个真实的 Key。
@@ -155,13 +164,22 @@ function Settings() {
           <div className="space-y-3">
             {config.downstream_keys.map((dk, i) => (
               <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-3 bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-                <input
-                  type="text"
-                  className="flex-1 bg-transparent text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
-                  value={dk.key}
-                  onChange={(e) => updateDownstream(i, "key", e.target.value)}
-                  placeholder="sk-client-key (客户端填的假Key)"
-                />
+                <div className="relative flex-1">
+                  <input
+                    type={showDownstreamKeys[i] ? "text" : "password"}
+                    className="w-full bg-transparent text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 pr-8 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
+                    value={dk.key}
+                    onChange={(e) => updateDownstream(i, "key", e.target.value)}
+                    placeholder="sk-client-key (客户端填的假Key)"
+                  />
+                  <button
+                    className="absolute right-1 top-1.5 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                    onClick={() => setShowDownstreamKeys({ ...showDownstreamKeys, [i]: !showDownstreamKeys[i] })}
+                    tabIndex={-1}
+                  >
+                    {showDownstreamKeys[i] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
                 <input
                   type="text"
                   className="w-full sm:w-48 bg-transparent text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Database, FileJson, Clock } from "lucide-react";
+import { Database, FileJson, Clock, List } from "lucide-react";
 import type { RequestRecord, DiffResult, Tab } from "../types";
 import DiffView from "./DiffView";
 import JsonViewer from "./JsonViewer";
@@ -18,7 +18,7 @@ function formatDuration(ms: number): string {
 function RequestDetail({ requestId }: Props) {
   const [record, setRecord] = useState<RequestRecord | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
-  const [tab, setTab] = useState<Tab>("diff");
+  const [tab, setTab] = useState<Tab>("headers");
   const [loading, setLoading] = useState(true);
 
   const load = () => {
@@ -66,8 +66,24 @@ function RequestDetail({ requestId }: Props) {
     );
   }
 
+  const virtualDiff = diff ?? (() => {
+    const body = record.request_body;
+    let msgs = "";
+    try {
+      const parsed = JSON.parse(body);
+      const messages = parsed.messages || [];
+      msgs = messages.map((m: any) => `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 500) : JSON.stringify(m.content).slice(0, 500)}`).join("\n");
+    } catch { msgs = body.slice(0, 500); }
+    return {
+      left_id: record.id, right_id: record.id,
+      left_messages: "", right_messages: msgs,
+      diff_text: msgs.split("\n").filter(l => l.trim()).map(l => `+ ${l}`).join("\n"),
+    };
+  })();
+
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "diff", label: diff ? "提示词变更" : "Diff (无上一请求)", icon: <Database className="w-3.5 h-3.5" /> },
+    { key: "diff", label: "提示词变更", icon: <Database className="w-3.5 h-3.5" /> },
+    { key: "headers", label: "请求头", icon: <List className="w-3.5 h-3.5" /> },
     { key: "request", label: "请求体", icon: <FileJson className="w-3.5 h-3.5" /> },
     { key: "response", label: "响应体", icon: <FileJson className="w-3.5 h-3.5" /> },
   ];
@@ -147,11 +163,27 @@ function RequestDetail({ requestId }: Props) {
 
       <div className="flex-1 overflow-auto p-4 bg-white dark:bg-slate-950">
         {tab === "diff" && (
-          diff ? (
-            <DiffView diff={diff} />
+          <DiffView diff={virtualDiff} />
+        )}
+        {tab === "headers" && (
+          record.request_headers && Object.keys(record.request_headers).length > 0 ? (
+            <pre className="text-xs font-mono leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-all">
+              {Object.entries(record.request_headers)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([key, value]) => (
+                  <div key={key} className="py-0.5 border-b border-slate-100 dark:border-slate-800 last:border-0">
+                    <span className="text-slate-500 dark:text-slate-400">{key}: </span>
+                    {key.toLowerCase() === "authorization"
+                      ? value.length > 20
+                        ? value.slice(0, 7) + "****" + value.slice(-4)
+                        : "****"
+                      : value}
+                  </div>
+                ))}
+            </pre>
           ) : (
             <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-sm">
-              需要至少两条请求才能计算 diff
+              该请求暂无请求头信息
             </div>
           )
         )}
