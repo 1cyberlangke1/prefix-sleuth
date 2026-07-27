@@ -5,6 +5,7 @@ mod store;
 use std::sync::atomic::Ordering;
 
 use tauri::Emitter;
+use tauri::Manager;
 use tokio::sync::oneshot;
 
 use models::{DiffResult, ProxyConfig, RequestRecord, RequestSummary};
@@ -16,7 +17,7 @@ fn get_config(state: tauri::State<'_, ProxyState>) -> ProxyConfig {
     state.config.read().unwrap().clone()
 }
 
-/// 更新代理配置并通知前端
+/// 更新代理配置并通知前端，同时持久化
 #[tauri::command]
 fn update_config(
     state: tauri::State<'_, ProxyState>,
@@ -27,6 +28,7 @@ fn update_config(
         let mut cfg = state.config.write().unwrap();
         *cfg = config;
     }
+    state.save_config();
     app_handle.emit("config-changed", ()).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -99,7 +101,6 @@ fn get_request_detail(
 }
 
 /// 计算相邻两条请求的 prompt diff（按下游 key 隔离）
-/// 只比较同一个 api_key_label 下的相邻请求
 #[tauri::command]
 fn get_diff(
     state: tauri::State<'_, ProxyState>,
@@ -109,7 +110,6 @@ fn get_diff(
     let idx = records.iter().position(|r| r.id == id)?;
     let current = &records[idx];
 
-    // 找同一 api_key_label 下前一条（时间上更早的）记录
     let prev = records.iter().skip(idx + 1).find(|r| r.api_key_label == current.api_key_label)?;
 
     let left_messages = models::extract_messages(&prev.request_body);
@@ -154,14 +154,20 @@ fn get_api_keys(state: tauri::State<'_, ProxyState>) -> Vec<String> {
 }
 
 /// Tauri 应用入口点
-/// 初始化状态，不自动启动代理（由前端控制）
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let proxy_state = ProxyState::new();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(proxy_state.clone())
+        .setup(|app| {
+            let data_dir = app.path().app_data_dir().ok();
+            if let Some(ref dir) = data_dir {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let proxy_state = ProxyState::new(data_dir);
+            proxy_state.load_config();
+            app.manage(proxy_state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_config,
             update_config,

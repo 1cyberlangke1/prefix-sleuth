@@ -1,44 +1,125 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::oneshot;
 
 use crate::models::{CacheInfo, ProxyConfig, RequestRecord, RequestSummary};
 
+const MAX_RECORDS: usize = 1000;
+
 /// 应用全局状态，同时被 Tauri 命令和代理服务器持有
-/// 内部用 Arc<RwLock<>> 实现线程安全，Clone 只复制 Arc 指针
 #[derive(Clone)]
 pub struct ProxyState {
-    pub config: Arc<std::sync::RwLock<ProxyConfig>>,
-    /// 请求记录队列，最新在前，最多保留 1000 条
-    pub records: Arc<std::sync::RwLock<VecDeque<RequestRecord>>>,
-    /// 代理服务器是否正在运行
+    pub config: Arc<RwLock<ProxyConfig>>,
+    pub records: Arc<RwLock<VecDeque<RequestRecord>>>,
     pub proxy_running: Arc<AtomicBool>,
-    /// 关闭服务器的信号发送端
     pub shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    data_dir: Arc<Option<PathBuf>>,
 }
 
 impl ProxyState {
-    pub fn new() -> Self {
-        Self {
-            config: Arc::new(std::sync::RwLock::new(ProxyConfig::default())),
-            records: Arc::new(std::sync::RwLock::new(VecDeque::with_capacity(1000))),
+    pub fn new(data_dir: Option<PathBuf>) -> Self {
+        let state = Self {
+            config: Arc::new(RwLock::new(ProxyConfig::default())),
+            records: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_RECORDS))),
             proxy_running: Arc::new(AtomicBool::new(false)),
             shutdown_tx: Arc::new(Mutex::new(None)),
+            data_dir: Arc::new(data_dir),
+        };
+        state.load_history();
+        state
+    }
+
+    fn log_path(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().as_ref().map(|d| d.join("requests.jsonl"))
+    }
+
+    fn config_path(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().as_ref().map(|d| d.join("config.json"))
+    }
+
+    /// 从 JSONL 文件加载历史记录
+    fn load_history(&self) {
+        let path = match self.log_path() {
+            Some(p) => p,
+            None => return,
+        };
+        let file = match std::fs::File::open(&path) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let mut reader = std::io::BufReader::new(file);
+        let mut all: Vec<RequestRecord> = Vec::new();
+        while let Ok(record) = jsonl::read::<_, RequestRecord>(&mut reader) {
+            all.push(record);
+        }
+        // 按 ID 去重（保留最后出现的版本，即最新更新）
+        let mut seen = HashSet::new();
+        let mut records = self.records.write().unwrap();
+        for record in all.into_iter().rev() {
+            if seen.contains(&record.id) {
+                continue;
+            }
+            seen.insert(record.id.clone());
+            if records.len() >= MAX_RECORDS {
+                break;
+            }
+            records.push_back(record);
         }
     }
 
-    /// 插入新请求记录到头（最新优先），超出 1000 条则淘汰末尾
+    /// 追加一条记录到 JSONL 文件
+    fn append_to_log(&self, record: &RequestRecord) {
+        let path = match self.log_path() {
+            Some(p) => p,
+            None => return,
+        };
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = jsonl::write(&mut file, record);
+        }
+    }
+
+    /// 保存配置到文件
+    pub fn save_config(&self) {
+        let path = match self.config_path() {
+            Some(p) => p,
+            None => return,
+        };
+        let config = self.config.read().unwrap();
+        if let Ok(json) = serde_json::to_string_pretty(&*config) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
+
+    /// 从文件加载配置
+    pub fn load_config(&self) {
+        let path = match self.config_path() {
+            Some(p) => p,
+            None => return,
+        };
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(config) = serde_json::from_str::<ProxyConfig>(&content) {
+                let mut cfg = self.config.write().unwrap();
+                *cfg = config;
+            }
+        }
+    }
+
     pub fn push_record(&self, record: RequestRecord) {
+        self.append_to_log(&record);
         let mut records = self.records.write().unwrap();
-        if records.len() >= 1000 {
+        if records.len() >= MAX_RECORDS {
             records.pop_back();
         }
         records.push_front(record);
     }
 
-    /// 流式请求完成后，用重建的完整响应 body 更新已有记录
     pub fn update_response(
         &self,
         id: &str,
@@ -53,10 +134,11 @@ impl ProxyState {
             record.response_body = Some(body);
             record.duration_ms = duration_ms;
             record.cache_info = cache_info;
+            // 同时追加更新后的记录到日志
+            self.append_to_log(record);
         }
     }
 
-    /// 返回所有记录的摘要列表
     pub fn get_summaries(&self) -> Vec<RequestSummary> {
         let records = self.records.read().unwrap();
         records
@@ -78,7 +160,6 @@ impl ProxyState {
             .collect()
     }
 
-    /// 按 ID 查找完整请求记录
     pub fn get_record(&self, id: &str) -> Option<RequestRecord> {
         let records = self.records.read().unwrap();
         records.iter().find(|r| r.id == id).cloned()
@@ -108,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_push_and_get_summaries() {
-        let state = ProxyState::new();
+        let state = ProxyState::new(None);
         state.push_record(make_record("1", "app-a"));
         state.push_record(make_record("2", "app-b"));
         let summaries = state.get_summaries();
@@ -119,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_update_response() {
-        let state = ProxyState::new();
+        let state = ProxyState::new(None);
         state.push_record(make_record("1", "test"));
 
         let cache_info = CacheInfo {
@@ -137,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_max_records() {
-        let state = ProxyState::new();
+        let state = ProxyState::new(None);
         for i in 0..1001 {
             state.push_record(make_record(&i.to_string(), "x"));
         }
@@ -147,7 +228,7 @@ mod tests {
 
     #[test]
     fn test_empty_state() {
-        let state = ProxyState::new();
+        let state = ProxyState::new(None);
         assert!(state.get_summaries().is_empty());
         assert!(state.get_record("nonexistent").is_none());
     }
