@@ -11,7 +11,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::sync::oneshot;
 
-use crate::models::{extract_model, mask_api_key, RequestRecord};
+use crate::models::{extract_cache_info, extract_model, mask_api_key, RequestRecord};
 use crate::store::ProxyState;
 
 /// 统一响应 body 类型：UnsyncBoxBody<Bytes, Box<dyn Error>>
@@ -162,6 +162,7 @@ async fn handle_request(
             response_body: None,
             response_status: None,
             duration_ms: 0,
+            cache_info: Default::default(),
         };
         let rid = record.id.clone();
         state.push_record(record);
@@ -210,7 +211,8 @@ async fn handle_request(
                     drop(tx);
                     let elapsed = start.elapsed().as_millis() as u64;
                     let full = String::from_utf8_lossy(&recorded.lock().unwrap()).to_string();
-                    state2.update_response(&rid2, status.as_u16(), full, elapsed);
+                    let cache_info = extract_cache_info(&full);
+                    state2.update_response(&rid2, status.as_u16(), full, elapsed, cache_info);
                 });
 
                 let frame_stream = tokio_stream::wrappers::ReceiverStream::new(rx)
@@ -226,7 +228,8 @@ async fn handle_request(
                 };
                 let elapsed = start.elapsed().as_millis() as u64;
                 let body_str = String::from_utf8_lossy(&resp_body).to_string();
-                state.update_response(&rid, status.as_u16(), body_str, elapsed);
+                let cache_info = extract_cache_info(&body_str);
+                state.update_response(&rid, status.as_u16(), body_str, elapsed, cache_info);
 
                 build_response(status, resp_headers, boxed_full(resp_body))
             }

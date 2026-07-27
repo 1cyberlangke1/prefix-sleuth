@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RequestSummary } from "./types";
 import RequestList from "./components/RequestList";
@@ -7,6 +7,14 @@ import Settings from "./components/Settings";
 
 type Page = "requests" | "settings";
 
+function avgCacheRate(requests: RequestSummary[]): number | null {
+  const rates = requests
+    .map((r) => r.cache_hit_rate)
+    .filter((r): r is number => r !== null);
+  if (rates.length === 0) return null;
+  return rates.reduce((a, b) => a + b, 0) / rates.length;
+}
+
 function App() {
   const [page, setPage] = useState<Page>("requests");
   const [requests, setRequests] = useState<RequestSummary[]>([]);
@@ -14,6 +22,8 @@ function App() {
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [apiKeys, setApiKeys] = useState<string[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const avgRate = useMemo(() => avgCacheRate(requests), [requests]);
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -86,6 +96,29 @@ function App() {
             代理运行中
           </span>
           <span>{requests.length} 条记录</span>
+          {avgRate !== null && (
+            <span className="flex items-center gap-1">
+              <span className={`w-2 h-2 rounded-full ${avgRate > 0.7 ? "bg-accent-green" : avgRate > 0.3 ? "bg-accent-yellow" : "bg-accent-red"}`} />
+              平均缓存 {(avgRate * 100).toFixed(0)}%
+            </span>
+          )}
+          <span className="flex items-center gap-0.5">
+            {requests.slice(0, 20).reverse().map((r, i) => (
+              <span
+                key={r.id}
+                className={`w-1 h-3 rounded-sm ${
+                  r.cache_hit_rate === null
+                    ? "bg-surface-0/30"
+                    : r.cache_hit_rate > 0.7
+                    ? "bg-accent-green"
+                    : r.cache_hit_rate > 0.3
+                    ? "bg-accent-yellow"
+                    : "bg-accent-red"
+                }`}
+                title={`#${requests.length - i}: ${r.cache_hit_rate !== null ? (r.cache_hit_rate * 100).toFixed(0) + "%" : "—"}`}
+              />
+            ))}
+          </span>
         </div>
       </header>
 

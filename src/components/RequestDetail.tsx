@@ -13,6 +13,14 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function cacheTag(rate: number | null): [string, string] {
+  if (rate === null) return ["text-text-muted", "—"];
+  const pct = (rate * 100).toFixed(1);
+  if (rate > 0.7) return ["text-accent-green", `${pct}%`];
+  if (rate > 0.3) return ["text-accent-yellow", `${pct}%`];
+  return ["text-accent-red", `${pct}%`];
+}
+
 function RequestDetail({ requestId }: Props) {
   const [record, setRecord] = useState<RequestRecord | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
@@ -48,6 +56,8 @@ function RequestDetail({ requestId }: Props) {
     );
   }
 
+  const [cacheColor, cacheLabel] = cacheTag(record.cache_info?.cache_hit_rate ?? null);
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "diff", label: diff ? "Prompt Diff" : "Diff (无上一请求)" },
     { key: "request", label: "请求体" },
@@ -58,9 +68,9 @@ function RequestDetail({ requestId }: Props) {
     <div className="h-full flex flex-col">
       <div className="px-4 py-2 bg-surface-1 border-b border-surface-0/50 shrink-0">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-3 text-xs flex-wrap">
             <span className="font-mono text-accent-blue">{record.method}</span>
-            <span className="text-text-muted truncate max-w-[300px]">{record.path}</span>
+            <span className="text-text-muted truncate max-w-[240px]">{record.path}</span>
             {record.model && (
               <span className="px-1.5 py-0.5 rounded bg-accent-mauve/20 text-accent-mauve font-mono text-[11px]">
                 {record.model}
@@ -68,13 +78,7 @@ function RequestDetail({ requestId }: Props) {
             )}
             <span className="text-text-muted">{record.api_key_label}</span>
             {record.response_status && (
-              <span
-                className={`font-bold ${
-                  record.response_status < 300
-                    ? "text-accent-green"
-                    : "text-accent-red"
-                }`}
-              >
+              <span className={`font-bold ${record.response_status < 300 ? "text-accent-green" : "text-accent-red"}`}>
                 {record.response_status}
               </span>
             )}
@@ -82,8 +86,28 @@ function RequestDetail({ requestId }: Props) {
               <span className="text-text-muted">{formatDuration(record.duration_ms)}</span>
             )}
           </div>
-          <span className="text-xs text-text-muted">{record.timestamp}</span>
+          <span className="text-xs text-text-muted shrink-0">{record.timestamp}</span>
         </div>
+        {record.cache_info && (record.cache_info.cache_hit_rate !== null) && (
+          <div className="flex items-center gap-3 mt-1.5 text-[11px]">
+            <span className={cacheColor}>缓存命中率：{cacheLabel}</span>
+            <span className="text-text-muted">
+              H:{record.cache_info.prompt_cache_hit_tokens ?? 0} / M:{record.cache_info.prompt_cache_miss_tokens ?? 0}
+            </span>
+            <div className="flex-1 max-w-[160px] h-1.5 rounded-full bg-surface-0 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  (record.cache_info.cache_hit_rate ?? 0) > 0.7
+                    ? "bg-accent-green"
+                    : (record.cache_info.cache_hit_rate ?? 0) > 0.3
+                    ? "bg-accent-yellow"
+                    : "bg-accent-red"
+                }`}
+                style={{ width: `${((record.cache_info.cache_hit_rate ?? 0) * 100).toFixed(0)}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-0 px-4 pt-2 border-b border-surface-0/50 shrink-0">
