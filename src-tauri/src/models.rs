@@ -81,7 +81,7 @@ pub struct RequestSummary {
     pub response_status: Option<u16>,
     /// 请求体前 120 字符的预览
     pub request_preview: String,
-    /// 缓存命中率（0.0 ~ 1.0），无数据时为 None
+    pub duration_ms: u64,
     pub cache_hit_rate: Option<f64>,
 }
 
@@ -136,30 +136,44 @@ pub fn extract_messages(body: &str) -> String {
     }
 }
 
-/// 从响应体 JSON 中解析 usage.prompt_cache_hit/miss_tokens
+/// 从响应体中解析 usage.prompt_cache_hit/miss_tokens
+/// 支持纯 JSON 和 SSE（data: {...}\n\n）格式
 /// 返回 CacheInfo（含计算好的命中率）
 pub fn extract_cache_info(body: &str) -> CacheInfo {
-    let val = serde_json::from_str::<serde_json::Value>(body);
-    match val {
-        Ok(ref v) => {
-            if let Some(usage) = v.get("usage") {
-                let hit = usage.get("prompt_cache_hit_tokens").and_then(|v| v.as_u64());
-                let miss = usage.get("prompt_cache_miss_tokens").and_then(|v| v.as_u64());
-                let rate = match (hit, miss) {
-                    (Some(h), Some(m)) if h + m > 0 => Some(h as f64 / (h + m) as f64),
-                    _ => None,
-                };
-                CacheInfo {
-                    prompt_cache_hit_tokens: hit,
-                    prompt_cache_miss_tokens: miss,
-                    cache_hit_rate: rate,
-                }
-            } else {
-                CacheInfo::default()
-            }
-        }
-        Err(_) => CacheInfo::default(),
+    let try_parse = |s: &str| -> Option<CacheInfo> {
+        let val = serde_json::from_str::<serde_json::Value>(s).ok()?;
+        let usage = val.get("usage")?;
+        let hit = usage.get("prompt_cache_hit_tokens").and_then(|v| v.as_u64());
+        let miss = usage.get("prompt_cache_miss_tokens").and_then(|v| v.as_u64());
+        let rate = match (hit, miss) {
+            (Some(h), Some(m)) if h + m > 0 => Some(h as f64 / (h + m) as f64),
+            _ => None,
+        };
+        Some(CacheInfo {
+            prompt_cache_hit_tokens: hit,
+            prompt_cache_miss_tokens: miss,
+            cache_hit_rate: rate,
+        })
+    };
+
+    // 先试整段解析（非流式纯 JSON）
+    if let Some(info) = try_parse(body) {
+        return info;
     }
+
+    // 再按行解析（SSE data: {...} 格式）
+    let mut last = CacheInfo::default();
+    for line in body.lines() {
+        let json = if let Some(rest) = line.strip_prefix("data: ") {
+            rest
+        } else {
+            line
+        };
+        if let Some(info) = try_parse(json) {
+            last = info;
+        }
+    }
+    last
 }
 
 #[cfg(test)]
