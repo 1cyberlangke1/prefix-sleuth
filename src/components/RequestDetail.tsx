@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RequestRecord, DiffResult, Tab } from "../types";
 import DiffView from "./DiffView";
@@ -21,23 +21,54 @@ function cacheTag(rate: number | null): [string, string] {
   return ["text-accent-red", `${pct}%`];
 }
 
+function fetchRecord(requestId: string): Promise<RequestRecord | null> {
+  return invoke<RequestRecord | null>("get_request_detail", { id: requestId });
+}
+
+function fetchDiff(requestId: string): Promise<DiffResult | null> {
+  return invoke<DiffResult | null>("get_diff", { id: requestId });
+}
+
 function RequestDetail({ requestId }: Props) {
   const [record, setRecord] = useState<RequestRecord | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [tab, setTab] = useState<Tab>("diff");
   const [loading, setLoading] = useState(true);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    setTab("diff");
+  const load = () => {
     Promise.all([
-      invoke<RequestRecord | null>("get_request_detail", { id: requestId }),
-      invoke<DiffResult | null>("get_diff", { id: requestId }),
+      fetchRecord(requestId),
+      fetchDiff(requestId),
     ]).then(([rec, diffRes]) => {
       setRecord(rec);
       setDiff(diffRes);
       setLoading(false);
     });
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    setTab("diff");
+    setRecord(null);
+    setDiff(null);
+    load();
+    // 响应未完成时每秒轮询
+    pollRef.current = setInterval(() => {
+      fetchRecord(requestId).then((rec) => {
+        if (rec) {
+          setRecord(rec);
+          setDiff(null); // 等下次 load
+          fetchDiff(requestId).then(setDiff);
+          if (rec.response_body) {
+            if (pollRef.current) clearInterval(pollRef.current);
+          }
+        }
+      });
+    }, 1000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [requestId]);
 
   if (loading) {
