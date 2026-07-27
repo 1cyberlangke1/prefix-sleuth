@@ -1,8 +1,13 @@
+#![cfg_attr(not(feature = "desktop"), allow(dead_code))]
+
 mod models;
+#[cfg(feature = "desktop")]
 mod proxy;
 mod store;
 
+#[cfg(feature = "desktop")]
 use models::{DiffResult, ProxyConfig, RequestRecord, RequestSummary};
+#[cfg(feature = "desktop")]
 use store::ProxyState;
 
 #[cfg(feature = "desktop")]
@@ -156,6 +161,7 @@ fn get_diff(
     })
 }
 
+#[cfg(feature = "desktop")]
 fn diff_text(left: &str, right: &str) -> String {
     let mut result = String::new();
     for change in similar::TextDiff::from_lines(left, right).iter_all_changes() {
