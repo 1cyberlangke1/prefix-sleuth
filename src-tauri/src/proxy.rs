@@ -308,3 +308,20 @@ pub async fn start_server(state: ProxyState, listener: tokio::net::TcpListener, 
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_inject_stream_options() {
+        let original = br#"{"model":"deepseek-chat","messages":[],"stream":true}"#;
+        let injected = inject_stream_options(original);
+        let injected_str = String::from_utf8(injected).unwrap();
+        assert!(injected_str.contains(r#""stream_options":{"include_usage":true}"#));
+
+        let original_false = br#"{"model":"deepseek-chat","messages":[],"stream":false}"#;
+        let injected_false = inject_stream_options(original_false);
+        assert_eq!(injected_false, original_false);
+    }
+}

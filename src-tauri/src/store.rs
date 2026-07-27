@@ -182,6 +182,17 @@ impl ProxyState {
         }
     }
 
+    pub fn delete_all(&self) {
+        let mut records = self.records.write().unwrap();
+        if !records.is_empty() {
+            records.clear();
+            if let Some(path) = self.log_path() {
+                let _ = std::fs::File::create(&path); // truncate file
+            }
+            self.emit("config-changed", ());
+        }
+    }
+
     pub fn get_summaries(&self) -> Vec<RequestSummary> {
         let records = self.records.read().unwrap();
         records
@@ -274,5 +285,21 @@ mod tests {
         let state = ProxyState::new(None);
         assert!(state.get_summaries().is_empty());
         assert!(state.get_record("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_delete_by_label_and_all() {
+        let state = ProxyState::new(None);
+        state.push_record(make_record("1", "app-a"));
+        state.push_record(make_record("2", "app-b"));
+        state.push_record(make_record("3", "app-a"));
+        
+        state.delete_by_label("app-a");
+        let sums = state.get_summaries();
+        assert_eq!(sums.len(), 1);
+        assert_eq!(sums[0].id, "2");
+        
+        state.delete_all();
+        assert!(state.get_summaries().is_empty());
     }
 }

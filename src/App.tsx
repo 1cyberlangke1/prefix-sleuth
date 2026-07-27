@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Search, Settings as SettingsIcon, Play, Square, Activity, LayoutList, Sun, Moon } from "lucide-react";
+import { Search, Settings as SettingsIcon, Play, Square, Activity, LayoutList, Sun, Moon, Trash2 } from "lucide-react";
 import type { RequestSummary } from "./types";
 import RequestList from "./components/RequestList";
 import RequestDetail from "./components/RequestDetail";
@@ -201,9 +201,9 @@ function App() {
         {page === "requests" && (
           <>
             <aside className={`w-full sm:w-80 shrink-0 flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 ${selectedId ? 'hidden sm:flex' : 'flex'}`}>
-              <div className="p-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="p-3 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
                 <select
-                  className="w-full bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                  className="flex-1 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   value={apiKeyFilter}
                   onChange={(e) => setApiKeyFilter(e.target.value)}
                 >
@@ -212,6 +212,26 @@ function App() {
                     <option key={k} value={k}>{k}</option>
                   ))}
                 </select>
+                <button
+                  className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:text-slate-400 dark:hover:text-red-400 dark:hover:bg-red-900/20 rounded-md transition-colors shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 shadow-sm"
+                  onClick={async () => {
+                    try {
+                      if (apiKeyFilter) {
+                        await invoke("clear_requests_by_key", { label: apiKeyFilter });
+                      } else {
+                        await invoke("clear_all_requests");
+                      }
+                      if (selectedId && requests.find(r => r.id === selectedId)?.api_key_label === apiKeyFilter || !apiKeyFilter) {
+                        setSelectedId(null);
+                      }
+                    } catch (e) {
+                      console.error("Failed to clear records", e);
+                    }
+                  }}
+                  title={apiKeyFilter ? `删除筛选结果 (${apiKeyFilter})` : "删除所有结果"}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
               <div className="flex-1 overflow-y-auto">
                 <RequestList

@@ -191,6 +191,13 @@ fn clear_requests_by_key(
     Ok(())
 }
 
+/// 清除所有历史记录
+#[tauri::command]
+fn clear_all_requests(state: tauri::State<'_, ProxyState>) -> Result<(), String> {
+    state.delete_all();
+    Ok(())
+}
+
 /// Tauri 应用入口点
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -222,6 +229,7 @@ pub fn run() {
             get_diff,
             get_api_keys,
             clear_requests_by_key,
+            clear_all_requests,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
