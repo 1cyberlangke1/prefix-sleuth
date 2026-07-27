@@ -218,6 +218,7 @@ impl ProxyState {
                     model: r.model.clone(),
                     response_status: r.response_status,
                     request_preview: preview,
+                    duration_ms: r.duration_ms,
                     cache_hit_rate: r.cache_info.cache_hit_rate,
                 }
             })

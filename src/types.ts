@@ -39,6 +39,7 @@ export interface RequestSummary {
   model: string | null;
   response_status: number | null;
   request_preview: string;
+  duration_ms: number;
   cache_hit_rate: number | null;
 }
 

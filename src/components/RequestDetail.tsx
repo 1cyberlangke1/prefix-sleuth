@@ -67,7 +67,7 @@ function RequestDetail({ requestId }: Props) {
   }
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "diff", label: diff ? "Prompt Diff" : "Diff (无上一请求)", icon: <Database className="w-3.5 h-3.5" /> },
+    { key: "diff", label: diff ? "提示词变更" : "Diff (无上一请求)", icon: <Database className="w-3.5 h-3.5" /> },
     { key: "request", label: "请求体", icon: <FileJson className="w-3.5 h-3.5" /> },
     { key: "response", label: "响应体", icon: <FileJson className="w-3.5 h-3.5" /> },
   ];

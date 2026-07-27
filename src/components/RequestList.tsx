@@ -13,12 +13,11 @@ function statusColor(s: number | null): string {
   return "text-red-600 dark:text-red-500";
 }
 
-function cacheBar(rate: number | null): [string, string] {
-  if (rate === null) return ["bg-slate-200 dark:bg-slate-700", "—"];
-  const pct = (rate * 100).toFixed(0) + "%";
-  if (rate > 0.7) return ["bg-green-500 dark:bg-green-500", pct];
-  if (rate > 0.3) return ["bg-yellow-500 dark:bg-yellow-500", pct];
-  return ["bg-red-500 dark:bg-red-500", pct];
+function cacheLabel(rate: number | null): string {
+  if (rate === null) return "text-slate-400 dark:text-slate-500";
+  if (rate > 0.7) return "text-green-600 dark:text-green-500";
+  if (rate > 0.3) return "text-yellow-600 dark:text-yellow-500";
+  return "text-red-600 dark:text-red-500";
 }
 
 function RequestList({ requests, selectedId, onSelect }: Props) {
@@ -32,7 +31,8 @@ function RequestList({ requests, selectedId, onSelect }: Props) {
         </div>
       )}
       {requests.map((r) => {
-        const [barColor, barLabel] = cacheBar(r.cache_hit_rate);
+        const cacheColor = cacheLabel(r.cache_hit_rate);
+        const cacheText = r.cache_hit_rate !== null ? (r.cache_hit_rate * 100).toFixed(0) + "%" : "—";
         const isSelected = selectedId === r.id;
         
         return (
@@ -45,22 +45,33 @@ function RequestList({ requests, selectedId, onSelect }: Props) {
             }`}
             onClick={() => onSelect(r.id)}
           >
-            <div className="flex items-center justify-between gap-2 mb-1.5">
+            <div className="flex items-center justify-between gap-2 mb-1">
               <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{r.timestamp}</span>
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${barColor}`} />
-                  <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">{barLabel}</span>
+                <span className={`text-[11px] font-bold ${cacheColor}`}>
+                  {cacheText}
                 </span>
                 <span className={`text-xs font-bold shrink-0 ${statusColor(r.response_status)}`}>
                   {r.response_status ?? "—"}
                 </span>
+                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                  {(r.duration_ms / 1000).toFixed(1)}s
+                </span>
               </div>
             </div>
-            
-            <div className="flex items-center gap-2 mb-1.5">
+
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-[10px] px-1 py-0.5 rounded-sm bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-mono border border-blue-200 dark:border-blue-800/50">
+                {r.method}
+              </span>
+              <span className="text-[10px] px-1 py-0.5 rounded-sm bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono truncate max-w-[180px] border border-slate-200 dark:border-slate-700" title={r.path}>
+                {r.path}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 mb-1">
               {r.model && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 font-mono truncate max-w-[140px] border border-purple-200 dark:border-purple-800/50">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 font-mono truncate max-w-[130px] border border-purple-200 dark:border-purple-800/50">
                   {r.model}
                 </span>
               )}
@@ -68,7 +79,7 @@ function RequestList({ requests, selectedId, onSelect }: Props) {
                 {r.api_key_label}
               </span>
             </div>
-            
+
             <div className="text-xs text-slate-600 dark:text-slate-400 truncate leading-relaxed">
               {r.request_preview}
             </div>

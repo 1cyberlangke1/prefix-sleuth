@@ -1,7 +1,9 @@
+use std::io::Read;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::Utc;
+use flate2::read::GzDecoder;
 use futures::StreamExt;
 use http_body::Frame;
 use http_body_util::{BodyExt, Full, StreamBody};
@@ -115,6 +117,27 @@ async fn collect_body(body: Incoming) -> Vec<u8> {
         .unwrap_or_default()
 }
 
+fn is_gzipped(headers: &hyper::HeaderMap) -> bool {
+    headers
+        .get("content-encoding")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.contains("gzip"))
+        .unwrap_or(false)
+}
+
+/// 解压 gzip 数据。如果没压缩或解压失败，返回原数据
+fn decompress_body(bytes: &[u8], headers: &hyper::HeaderMap) -> Vec<u8> {
+    if !is_gzipped(headers) {
+        return bytes.to_vec();
+    }
+    let mut decoder = GzDecoder::new(bytes);
+    let mut out = Vec::new();
+    if decoder.read_to_end(&mut out).is_err() {
+        return bytes.to_vec();
+    }
+    out
+}
+
 fn build_response(
     status: hyper::StatusCode,
     headers: hyper::HeaderMap,
@@ -122,14 +145,7 @@ fn build_response(
 ) -> hyper::Response<DynBody> {
     let mut resp = hyper::Response::new(body);
     *resp.status_mut() = status;
-    for (k, v) in headers.iter() {
-        if k.as_str().eq_ignore_ascii_case("content-encoding")
-            || k.as_str().eq_ignore_ascii_case("transfer-encoding")
-        {
-            continue;
-        }
-        resp.headers_mut().insert(k.clone(), v.clone());
-    }
+    resp.headers_mut().extend(headers.iter().map(|(k, v)| (k.clone(), v.clone())));
     resp
 }
 
@@ -233,21 +249,31 @@ async fn handle_request(
                 let recorded = recorded_body.clone();
                 let rid2 = rid.clone();
                 let state2 = state.clone();
+                let resp_headers2 = resp_headers.clone();
 
                 tokio::spawn(async move {
                     let mut stream = reqwest_resp.bytes_stream();
+                    let mut chunk_count = 0u64;
                     while let Some(chunk) = stream.next().await {
                         match chunk {
                             Ok(bytes) => {
                                 recorded.lock().unwrap().extend_from_slice(&bytes);
                                 if tx.send(bytes).await.is_err() { break; }
+                                chunk_count += 1;
+                                if chunk_count % 5 == 0 {
+                                    let partial_raw = recorded.lock().unwrap().clone();
+                                    let partial = String::from_utf8_lossy(&decompress_body(&partial_raw, &resp_headers2)).to_string();
+                                    let elapsed = start.elapsed().as_millis() as u64;
+                                    let cache_info = extract_cache_info(&partial);
+                                    state2.update_response(&rid2, status.as_u16(), partial, elapsed, cache_info);
+                                }
                             }
                             Err(_) => break,
                         }
                     }
                     drop(tx);
                     let elapsed = start.elapsed().as_millis() as u64;
-                    let full = String::from_utf8_lossy(&recorded.lock().unwrap()).to_string();
+                    let full = String::from_utf8_lossy(&decompress_body(&recorded.lock().unwrap(), &resp_headers2)).to_string();
                     let cache_info = extract_cache_info(&full);
                     state2.update_response(&rid2, status.as_u16(), full, elapsed, cache_info);
                 });
@@ -263,7 +289,7 @@ async fn handle_request(
                     Err(_) => Bytes::new(),
                 };
                 let elapsed = start.elapsed().as_millis() as u64;
-                let body_str = String::from_utf8_lossy(&resp_body).to_string();
+                let body_str = String::from_utf8_lossy(&decompress_body(&resp_body, &resp_headers)).to_string();
                 let cache_info = extract_cache_info(&body_str);
                 state.update_response(&rid, status.as_u16(), body_str, elapsed, cache_info);
 
