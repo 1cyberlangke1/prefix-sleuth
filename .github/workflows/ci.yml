@@ -120,10 +120,12 @@ jobs:
           path: src-tauri/target/release/bundle/
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         if: github.event_name == 'release'
         with:
-          files: |
+          replacesArtifacts: true
+          artifacts: |
             src-tauri/target/release/bundle/**/*
             src-tauri/target/release/prefix-sleuth
             src-tauri/target/release/prefix-sleuth.exe
+          artifactErrorsFailBuild: false
