@@ -125,8 +125,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          find src-tauri/target/release/bundle -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.msi' \) \
-            -exec gh release upload "${{ github.ref_name }}" {} --clobber \;
-          [ -f src-tauri/target/release/prefix-sleuth.exe ] && \
+          set +e
+          find src-tauri/target/release/bundle -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.msi' \) -print0 | while IFS= read -r -d '' f; do
+            echo "Uploading: $f"
+            gh release upload "${{ github.ref_name }}" "$f" --clobber 2>&1
+            echo "Exit code: $?"
+          done
+          if [ -f src-tauri/target/release/prefix-sleuth.exe ]; then
             gh release upload "${{ github.ref_name }}" \
-              src-tauri/target/release/prefix-sleuth.exe --clobber
+              src-tauri/target/release/prefix-sleuth.exe --clobber 2>&1
+          fi
