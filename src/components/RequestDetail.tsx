@@ -72,7 +72,7 @@ function RequestDetail({ requestId }: Props) {
     try {
       const parsed = JSON.parse(body);
       const messages = parsed.messages || [];
-      msgs = messages.map((m: any) => `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 500) : JSON.stringify(m.content).slice(0, 500)}`).join("\n");
+      msgs = JSON.stringify(messages, null, 2);
     } catch { msgs = body.slice(0, 500); }
     return {
       left_id: record.id, right_id: record.id,
