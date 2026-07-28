@@ -124,6 +124,7 @@ jobs:
         if: github.event_name == 'release'
         with:
           replacesArtifacts: true
+          allowUpdates: true
           artifacts: |
             src-tauri/target/release/bundle/**/*
             src-tauri/target/release/prefix-sleuth
