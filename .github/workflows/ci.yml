@@ -120,13 +120,11 @@ jobs:
           path: src-tauri/target/release/bundle/
 
       - name: Upload to release
-        uses: ncipollo/release-action@v1
         if: github.event_name == 'release'
-        with:
-          replacesArtifacts: true
-          allowUpdates: true
-          artifacts: |
-            src-tauri/target/release/bundle/**/*
-            src-tauri/target/release/prefix-sleuth
-            src-tauri/target/release/prefix-sleuth.exe
-          artifactErrorsFailBuild: false
+        shell: bash
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            src-tauri/target/release/bundle/**/* \
+            src-tauri/target/release/prefix-sleuth \
+            src-tauri/target/release/prefix-sleuth.exe \
+            --clobber
