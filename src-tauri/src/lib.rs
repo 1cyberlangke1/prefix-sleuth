@@ -121,7 +121,7 @@ fn get_requests(
     let mut summaries = state.get_summaries();
     if let Some(ref filter) = api_key_filter {
         if !filter.is_empty() {
-            summaries.retain(|s| s.api_key_label.contains(filter));
+            summaries.retain(|s| s.api_key_label == *filter);
         }
     }
     summaries
