@@ -125,9 +125,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release upload "${{ github.ref_name }}" \
-            src-tauri/target/release/bundle/**/* \
-            --clobber
+          for ext in dmg deb msi; do
+            for f in src-tauri/target/release/bundle/*/*.$ext; do
+              [ -f "$f" ] && gh release upload "${{ github.ref_name }}" "$f" --clobber
+            done
+          done
           [ -f src-tauri/target/release/prefix-sleuth.exe ] && \
             gh release upload "${{ github.ref_name }}" \
               src-tauri/target/release/prefix-sleuth.exe --clobber
